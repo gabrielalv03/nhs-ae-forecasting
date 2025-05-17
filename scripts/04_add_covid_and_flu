@@ -1,1 +1,430 @@
+# -------------------- SETUP --------------------
+packages <- c("tidyverse", "lubridate", "rvest", "httr", "readODS", "readxl", "conflicted", "janitor")
+new_packages <- packages[!(packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+
+library(tidyverse)
+library(lubridate)
+library(readxl)
+library(readODS)
+library(janitor)
+library(conflicted)
+conflicts_prefer(dplyr::filter)
+
+# -------------------- FILE LOCATIONS --------------------
+files <- list(
+  "2019-2020" = "Weekly_Influenza_and_COVID19_report_data_w27_v2.ods",
+  "2020-2021" = "Weekly_Influenza_and_COVID19_report_data_w27_v2.ods",
+  "2021-2022" = "Weekly_Influenza_and_COVID19_report_data_w27_v2.ods",
+  "2022-2023" = "Weekly_Influenza_and_COVID19_report_data_summer_w27_report.ods",
+  "2023-2024" = "weekly-Influenza-and-COVID-19-report-data-week-27.ods",
+  "2024-2025" = "weekly-influenza-and-COVID-19-report-data-week-19-2025.ods"
+)
+
+# -------------------- EXTRACTION FUNCTIONS --------------------
+extract_2019 <- function(path, season) {
+  flu_df <- read_ods(path, sheet = "Figure_10__Datamart_-_Flu", skip = 7)
+  
+  # Confirm names
+  print(names(flu_df))
+  
+  flu_df <- flu_df %>%
+    select(
+      week = `Week no`,
+      influenza_pct = `Influenza 2019-2020 (%)`
+    ) %>%
+    mutate(
+      week = as.numeric(week),
+      influenza_pct = as.numeric(influenza_pct),
+      covid_pct = NA_real_,
+      source = season
+    )
+  
+  return(flu_df)
+}
+
+data_2019 <- extract_2019("Weekly_Influenza_and_COVID19_report_data_w27_v2.ods", "2019-2020")
+
+extract_2020 <- function(path, season) {
+  flu_df <- read_ods(path, sheet = "Figure_10__Datamart_-_Flu", skip = 7)
+  
+  # Confirm names
+  print(names(flu_df))
+  
+  flu_df <- flu_df %>%
+    select(
+      week = `Week no`,
+      influenza_pct = `Influenza 2020-2021 (%)`
+    ) %>%
+    mutate(
+      week = as.numeric(week),
+      influenza_pct = as.numeric(influenza_pct),
+      covid_pct = NA_real_,
+      source = season
+    )
+  
+  return(flu_df)
+}
+
+data_2020 <- extract_2020("Weekly_Influenza_and_COVID19_report_data_w27_v2.ods", "2020-2021")
+
+extract_2021 <- function(path, season) {
+  # Flu (national only)
+  flu_df <- read_ods(path, sheet = "Figure_10__Datamart_-_Flu", skip = 7) %>%
+    select(
+      week = `Week no`,
+      influenza_pct = `Influenza 2021-2022 (%)`
+    ) %>%
+    mutate(
+      week = as.numeric(week),
+      influenza_pct = as.numeric(influenza_pct)
+    )
+  
+  # COVID (regional)
+  covid_df <- read_ods(path, sheet = "Figure_7__Positivity_by_region", skip = 8) %>%
+    select(
+      week = `Week number`,
+      `East Midlands`:`Yorkshire and Humber`
+    ) %>%
+    pivot_longer(
+      cols = -week,
+      names_to = "region",
+      values_to = "covid_pct_region"
+    ) %>%
+    mutate(
+      week = as.numeric(week),
+      covid_pct_region = as.numeric(covid_pct_region)
+    )
+  
+  # Expand flu to match regions
+  data_merged <- covid_df %>%
+    left_join(flu_df, by = "week") %>%
+    mutate(source = season)
+  
+  return(data_merged)
+}
+
+data_2021 <- extract_2021("Weekly_Influenza_and_COVID19_report_data_w27_v2.ods", "2021-2022")
+
+extract_2022 <- function(path, season) {
+  # --- Flu Data ---
+  flu_df <- read_ods(path, sheet = "Supple_13__Datamart_-_Flu_reg_%", skip = 7) %>%
+    clean_names()
+  
+  flu_week_col <- grep("week", names(flu_df), value = TRUE)[1]
+  
+  flu_df <- flu_df %>%
+    pivot_longer(
+      cols = setdiff(names(flu_df), flu_week_col),
+      names_to = "region_flu",
+      values_to = "flu_pct_region"
+    ) %>%
+    rename(week = !!flu_week_col) %>%
+    mutate(
+      week = as.numeric(week),
+      flu_pct_region = as.numeric(flu_pct_region)
+    ) %>%
+    group_by(week) %>%
+    summarise(flu_pct_region = mean(flu_pct_region, na.rm = TRUE), .groups = "drop")
+  
+  # --- COVID Data ---
+  raw <- read_ods(path, sheet = "Figure_3__Positivity_by_region", skip = 8)
+  raw <- raw[, -1]  # Drop empty column
+  
+  raw <- raw %>%
+    mutate(
+      row_id = row_number(),
+      week = ((floor((row_id - 1) / 7) + 26) %% 52) + 1
+    )
+  
+  covid_df <- raw %>%
+    pivot_longer(
+      cols = -c(Date, row_id, week),
+      names_to = "region",
+      values_to = "covid_pct_region"
+    ) %>%
+    mutate(
+      region = str_to_title(region)
+    ) %>%
+    group_by(week, region) %>%
+    summarise(covid_pct_region = mean(covid_pct_region, na.rm = TRUE), .groups = "drop")
+  
+  # --- Join COVID and Flu ---
+  result <- left_join(covid_df, flu_df, by = "week") %>%
+    mutate(source = season)
+  
+  print(head(result))
+  return(result)
+}
+
+
+data_2022 <- extract_2022("Weekly_Influenza_and_COVID19_report_data_summer_w27_report.ods", "2022-2023")
+
+extract_2023 <- function(path, season) {
+  flu_df <- read_ods(path, sheet = "Slide_7", skip = 3) %>%
+    clean_names()
+  
+  week_col <- grep("week", names(flu_df), value = TRUE)[1]
+  
+  flu_df <- flu_df %>%
+    pivot_longer(
+      cols = setdiff(names(flu_df), week_col),
+      names_to = "region",
+      values_to = "flu_pct_region",
+      values_drop_na = TRUE
+    ) %>%
+    rename(week = !!week_col) %>%
+    mutate(
+      region = str_to_title(str_replace_all(region, "_", " ")),
+      week = as.numeric(week),
+      flu_pct_region = as.numeric(flu_pct_region)
+    )
+  
+  covid_df <- read_ods(path, sheet = "Slide_9", skip = 3) %>%
+    clean_names()
+  
+  week_col <- grep("week", names(covid_df), value = TRUE)[1]
+  
+  covid_df <- covid_df %>%
+    pivot_longer(
+      cols = setdiff(names(covid_df), week_col),
+      names_to = "region",
+      values_to = "covid_pct_region",
+      values_drop_na = TRUE
+    ) %>%
+    rename(week = !!week_col) %>%
+    mutate(
+      region = str_to_title(str_replace_all(region, "_", " ")),
+      week = as.numeric(week),
+      covid_pct_region = as.numeric(covid_pct_region)
+    )
+  
+  full_join(flu_df, covid_df, by = c("week", "region")) %>%
+    filter(!is.na(region)) %>%
+    mutate(source = season)
+}
+
+data_2023 <- extract_2023("weekly-Influenza-and-COVID-19-report-data-week-27.ods", "2023-2024")
+
+extract_2024 <- function(path, season) {
+  # --- COVID Data --- (from Slide 15 in your screenshot)
+  covid_df <- read_ods(path, sheet = "Slide_16", skip = 3) %>%
+    clean_names() %>%
+    select(
+      week = week_number,
+      london,
+      midlands_and_east_of_england = midlands_and_east_of_england,
+      north_of_england = north_of_england,
+      south_of_england = south_of_england  # Note: Fix if there's a typo in actual data
+    ) %>%
+    pivot_longer(
+      cols = -week,
+      names_to = "region",
+      values_to = "covid_pct_region"
+    ) %>%
+    mutate(
+      region = case_when(
+        region == "midlands_and_east_of_england" ~ "Midlands and East of England",
+        region == "north_of_england" ~ "North of England",
+        region == "south_of_england" ~ "South of England",
+        TRUE ~ str_to_title(str_replace_all(region, "_", " "))
+      ),
+      week = as.numeric(week),
+      covid_pct_region = as.numeric(covid_pct_region)
+    )
+  
+  # --- Flu Data --- (from Slide 12 - adjust as needed)
+  flu_df <- read_ods(path, sheet = "Slide_12", skip = 3) %>%
+    clean_names() %>%
+    select(
+      week = week_number,
+      london,
+      midlands_and_east_of_england = midlands_and_east_of_england,
+      north_of_england = north_of_england,
+      south_of_england = south_of_england
+    ) %>%
+    pivot_longer(
+      cols = -week,
+      names_to = "region",
+      values_to = "flu_pct_region"
+    ) %>%
+    mutate(
+      region = case_when(
+        region == "midlands_and_east_of_england" ~ "Midlands and East of England",
+        region == "north_of_england" ~ "North of England",
+        region == "south_of_england" ~ "South of England",
+        TRUE ~ str_to_title(str_replace_all(region, "_", " "))
+      ),
+      week = as.numeric(week),
+      flu_pct_region = as.numeric(flu_pct_region)
+    )
+  
+  # --- Merge & Output ---
+  full_join(flu_df, covid_df, by = c("week", "region")) %>%
+    filter(!is.na(region)) %>%
+    mutate(source = season)
+}
+
+data_2024 <- extract_2024("weekly-influenza-and-COVID-19-report-data-week-19-2025.ods", "2024-2025")
+
+# -------------------- COMBINE DATA --------------------
+# Standardize each dataset before binding
+ods_data <- bind_rows(
+  # 2019-2020 (national only)
+  extract_2019(files[["2019-2020"]], "2019-2020") %>%
+    mutate(region = "National") %>%
+    rename(flu_pct = influenza_pct,
+           covid_pct_region = covid_pct) %>%
+    select(week, region, flu_pct, covid_pct_region, source),
+  
+  # 2020-2021 (national only)
+  extract_2020(files[["2020-2021"]], "2020-2021") %>%
+    mutate(region = "National") %>%
+    rename(flu_pct = influenza_pct,
+           covid_pct_region = covid_pct) %>%
+    select(week, region, flu_pct, covid_pct_region, source),
+  
+  # 2021-2022 (regional)
+  extract_2021(files[["2021-2022"]], "2021-2022") %>%
+    rename(flu_pct = influenza_pct) %>%
+    select(week, region, flu_pct, covid_pct_region, source),
+  
+  # 2022-2023 (regional)
+  extract_2022(files[["2022-2023"]], "2022-2023") %>%
+    rename(flu_pct = flu_pct_region) %>%
+    select(week, region, flu_pct, covid_pct_region, source),
+  
+  # 2023-2024 (regional)
+  extract_2023(files[["2023-2024"]], "2023-2024") %>%
+    rename(flu_pct = flu_pct_region) %>%
+    select(week, region, flu_pct, covid_pct_region, source),
+  
+  # 2024-2025 (regional)
+  extract_2024(files[["2024-2025"]], "2024-2025") %>%
+    rename(flu_pct = flu_pct_region) %>%
+    select(week, region, flu_pct, covid_pct_region, source)
+)
+
+# Standardize region names
+ods_data <- ods_data %>%
+  mutate(
+    region = case_when(
+      region == "National" ~ "National",
+      str_detect(region, "Midlands|East of England") ~ "Midlands and East",
+      str_detect(region, "North of England|North East|North West|Yorkshire") ~ "North",
+      str_detect(region, "South of England|South East|South West") ~ "South",
+      str_detect(region, "London") ~ "London",
+      TRUE ~ region
+    )
+  )
+
+# -------------------- CLEANING AND FINAL MERGE --------------------
+# Now we can handle the patch and final cleaning
+ods_data <- ods_data %>%
+  # Apply the week 26 patch
+  bind_rows(
+    tibble(
+      week = 26,
+      region = c("Midlands and East", "North", "South", "London"),
+      flu_pct = NA_real_,
+      covid_pct_region = 4.2,
+      source = "2022-2023"
+    )
+  ) %>%
+  # Final cleaning
+  mutate(
+    flu_percent = ifelse(is.na(flu_pct), NA_real_, flu_pct),
+    covid_percent = ifelse(is.na(covid_pct_region), NA_real_, covid_pct_region)
+  ) %>%
+  select(-flu_pct, -covid_pct_region)
+
+# -------------------- AGGREGATE TO MONTHLY --------------------
+ods_data <- ods_data %>%
+  mutate(
+    season_start = as.numeric(str_extract(source, "^\\d{4}")),
+    season_end = season_start + 1,
+    year_actual = if_else(week < 27, season_end, season_start),
+    week_date = as.Date(paste0(year_actual, "-01-01")) + weeks(week - 1),
+    time_period = format(week_date, "%B %Y")
+  ) %>%
+  filter(!is.na(week))  # Remove any rows with missing week numbers
+
+# -------------------- NHS Regions --------------------
+nhs_regions <- c(
+  "NHS England Midlands",
+  "NHS England East Of England",
+  "NHS England London",
+  "NHS England North East And Yorkshire",
+  "NHS England North West",
+  "NHS England South East",
+  "NHS England South West"
+)
+
+# -------------------- Region Mapping Table --------------------
+region_map <- tibble(
+  original = c(
+    "National",
+    "Midlands and East",
+    "East Of England",
+    "London",
+    "North",
+    "North Of England",
+    "South",
+    "South Of England"
+  ),
+  nhs = list(
+    # National → ALL NHS regions
+    nhs_regions,
+    # Midlands and East
+    c("NHS England Midlands", "NHS England East Of England"),
+    # East Of England
+    c("NHS England East Of England"),
+    # London
+    c("NHS England London"),
+    # North and North Of England
+    c("NHS England North East And Yorkshire", "NHS England North West"),
+    c("NHS England North East And Yorkshire", "NHS England North West"),
+    # South and South Of England
+    c("NHS England South East", "NHS England South West"),
+    c("NHS England South East", "NHS England South West")
+  )
+)
+
+# -------------------- Expand Regions Based on Mapping --------------------
+# 1. Expand rows with a mapping (National, North, South, etc.)
+ods_data_expanded <- ods_data %>%
+  inner_join(region_map, by = c("region" = "original")) %>%
+  unnest(nhs) %>%
+  mutate(region = nhs) %>%
+  select(-nhs)
+
+# 2. Keep rows that are already correctly named NHS regions
+ods_data_direct <- ods_data %>%
+  filter(region %in% nhs_regions)
+
+# 3. Combine both
+ods_data_nhs <- bind_rows(ods_data_expanded, ods_data_direct)
+
+monthly_data_nhs <- ods_data_nhs %>%
+  group_by(time_period, region) %>%
+  summarise(
+    flu_percent = mean(flu_percent, na.rm = TRUE),
+    covid_percent = mean(covid_percent, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(time_period, region)
+
+# -------------------- EXPORT --------------------
+write_csv(monthly_data_nhs, "flu_covid_monthly_averages.csv")
+message("✅ Saved ", nrow(monthly_data), " monthly average rows.")
+
+monthly_nhs_regions_cleaned <- monthly_data_nhs %>%
+  mutate(date = my(time_period))  # creates a date like 2020-04-01
+
+# Create a new merged dataset
+IMD_seasons_covidflu_data_nhs <- IMD_seasons_data_nhs %>%
+  left_join(monthly_nhs_regions_cleaned, by = c("time_date" = "date", "region" = "region"))
+
+IMD_seasons_covidflu_data_nhs <- IMD_seasons_covidflu_data_nhs %>%
+  select(-time_period.y)
 
