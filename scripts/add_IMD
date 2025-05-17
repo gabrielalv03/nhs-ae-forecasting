@@ -1,0 +1,74 @@
+# ADD IMD TO NEW DATAFRAME
+
+# Install once
+install.packages("devtools")
+devtools::install_github("epiforecasts/covid19.nhs.data")
+
+# Load it
+library(covid19.nhs.data)
+library(dplyr)
+
+mapping_raw <- load_mapping(scale = "utla", source = "link")
+
+mapping_named <- mapping_raw %>%
+  get_names(geo_names = utla_names)
+
+file_path1 <- "/Users/gabrielavargas/Downloads/FYP/SOCIOECON/IMD_DATA.xlsx"
+imd_data <- read_excel(file_path1, sheet = 2)
+
+imd_data_clean <- imd_data %>%
+  rename(UTLA = `Upper Tier Local Authority District name (2019)`) %>%
+  mutate(UTLA = trimws(tolower(UTLA)))  # lowercase for consistent join
+
+# Step 1: Load mapping with trust + UTLA names
+mapping <- load_mapping(scale = "utla", source = "link") %>%
+  get_names(geo_names = utla_names)
+
+# Step 2: Standardize names for join
+imd_data_clean <- imd_data_clean %>%
+  rename(imd_score = `IMD - Average score`,  # Replace with your actual column name if different
+         geo_name = UTLA) %>%
+  mutate(geo_name = tolower(geo_name))
+
+mapping <- mapping %>%
+  mutate(geo_name = tolower(geo_name))
+
+# Step 3: Join IMD scores into mapping
+mapping_with_imd <- mapping %>%
+  left_join(imd_data_clean, by = "geo_name")
+
+# Step 4: Create new dataset with Trust-level weighted IMD score
+trust_data_with_imd <- mapping_with_imd %>%
+  group_by(trust_name) %>%
+  summarise(
+    weighted_imd = sum(imd_score * p_trust, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Final check
+head(trust_data_with_imd)
+
+# Create a new merged dataset
+final_data <- combined_data %>%
+  left_join(trust_data_with_imd, by = c("name" = "trust_name"))
+
+# Preview the merged data
+head(final_data)
+
+# Check if there are any Trusts with missing IMD data
+final_data %>% filter(is.na(weighted_imd)) %>% select(name)
+
+# Create a clean dataset with no missing values in the needed columns
+model_data <- final_data %>%
+  select(AE_att_tot, weighted_imd) %>%
+  filter(!is.na(AE_att_tot) & !is.na(weighted_imd))
+
+model_data <- model_data %>%
+  mutate(
+    AE_att_tot = as.numeric(AE_att_tot),
+    weighted_imd = as.numeric(weighted_imd)
+  )
+
+clean_data <- final_data %>%
+  filter(!is.na(weighted_imd) & !is.na(AE_att_tot))
+
