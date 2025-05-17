@@ -1,0 +1,276 @@
+# === Load libraries ===
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+library(purrr)
+library(lubridate)
+
+# === Aggregate Monthly A&E Attendances by Region and Normalize per 100,000 People ===
+plot_data <- ordered_data %>%
+  mutate(
+    region_label = str_remove(str_trim(region), "^NHS England\\s+"),
+    month        = floor_date(date, "month"),
+    year         = year(month)
+  ) %>%
+  group_by(region, region_label, month, year) %>%
+  summarise(
+    AE_per4_all = mean(AE_per4_all, na.rm = TRUE),
+    .groups     = "drop"
+  ) %>%
+  rename(date = month) %>%
+  mutate(
+    AE_over4_pct = (1 - AE_per4_all) * 100
+  )
+
+# === Set standard theme ===
+theme_nhs <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title.position = "plot",
+    plot.title          = element_text(hjust = 0.5, face = "bold"),
+    legend.position     = "bottom",
+    legend.key          = element_rect(fill = "white", linewidth = 0),
+    axis.text.x         = element_text(angle = 30, hjust = 1),
+    axis.text.y         = element_text(),
+    axis.title.x        = element_text(size = 14),
+    axis.title.y        = element_text(size = 14),
+    panel.grid.major    = element_line(color = "grey80", linewidth = 0.3),
+    panel.grid.minor    = element_blank(),
+    panel.border        = element_rect(color = "grey80", fill = NA, linewidth = 0.3)
+  )
+
+theme_set(theme_nhs)
+
+# ============================================================================================================
+# TOTAL AE ATTENDENCES BY REGION AND NATIONAL TREND
+# ============================================================================================================
+
+# --- Pre-compute everything once ---
+
+# 1) COVID window
+covid_df <- tibble(
+  xmin = as.Date("2020-01-01"),
+  xmax = as.Date("2021-12-31"),
+  ymin = -Inf,
+  ymax = Inf
+)
+
+# 2) National average (absolute attendances) + percent slope
+national_trend <- plot_data %>%
+  group_by(date) %>%
+  summarize(AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop")
+
+national_trend <- national_trend %>%
+  mutate(year_float = lubridate::decimal_date(date))
+
+lm_nat <- lm(AE_over4_pct ~ year_float, data = national_trend)
+slope_abs_per_year <- coef(lm_nat)["year_float"]
+mean_att <- mean(national_trend$AE_over4_pct, na.rm = TRUE)
+slope_pct_per_year <- slope_abs_per_year / mean_att
+
+# 3) Region palette
+region_names <- sort(unique(plot_data$region_label))
+region_cols  <- brewer.pal(length(region_names), "Dark2") %>% set_names(region_names)
+all_cols     <- c("National avg" = "black", region_cols)
+
+# 4) Draw the plot
+ggplot(plot_data, aes(date, AE_over4_pct)) +
+  
+  # COVID shading
+  geom_rect(data = covid_df,
+            aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            inherit.aes = FALSE, fill = "#FF6666", alpha = 0.1) +
+  
+  # Pandemic label
+  annotate("text",
+           x     = as.Date("2021-01-01"),
+           y     = max(plot_data$AE_over4_pct) * 0.93,
+           label = "COVID-19\nPandemic",
+           fontface = "bold.italic", color = "#FF3333", size = 4, vjust = 0.5) +
+  
+  # Regional lines + dashed pre/post fits
+  geom_line(aes(color = region_label), size = 0.8,   alpha = 0.3) +
+  geom_smooth(data = filter(plot_data, date <  as.Date("2020-01-01")),
+              aes(color = region_label), method = "lm", se = FALSE,
+              linetype = "dashed", size = 1) +
+  geom_smooth(data = filter(plot_data, date >  as.Date("2021-12-31")),
+              aes(color = region_label), method = "lm", se = FALSE,
+              linetype = "dashed", size = 1) +
+  
+  # National avg solid fit
+  geom_smooth(data = national_trend,
+              aes(color = "National avg"), method = "lm", se = FALSE,
+              size = 1.2) +
+  
+  # %/year annotation
+  annotate("text",
+           x     = as.Date("2018-01-01"),
+           y     = max(plot_data$AE_over4_pct, na.rm = TRUE),
+           label = sprintf("+%.2f pp/year", slope_abs_per_year),
+           fontface = "bold", size = 4, vjust = 17, hjust = -3) +
+  
+  # manual colours & legend order
+  scale_color_manual(
+    name   = NULL,
+    values = all_cols,
+    breaks = c("National avg", region_names)
+  ) +
+  guides(color = guide_legend(nrow = 2, ncol = 4, byrow = TRUE)) +
+  
+  # axes
+  scale_y_continuous(
+    name = "% Attendances Over 4 Hours",
+    labels = function(x) paste0(x, "%"),
+    limits = c(0, 35), expand = c(0, 0)
+  ) +
+  scale_x_date(
+    name   = "Year",
+    date_breaks = "1 year",
+    date_labels = "%Y",
+    limits      = as.Date(c("2015-07-01","2025-01-01")),
+    expand      = c(0,0)
+  ) +
+  
+  labs(
+    title = "% A&E Attendances Over 4 Hours by Region",
+    x     = NULL
+  )
+
+# ============================================================================================================
+# AE ATTENDENCES OVER 4 HOURS BY REGION
+# ============================================================================================================
+
+# --- Precompute percent‐slopes once ---
+
+# 1) Add day counter
+plot_data_norm2 <- plot_data %>%
+  mutate(day = as.numeric(date - min(date)))
+
+# 2) National average per 100k & its percent slope per year
+national_norm <- plot_data_norm2 %>%
+  group_by(date) %>%
+  summarize(AE_over4_pct = mean(AE_over4_pct), .groups = "drop")
+
+lm_nat_raw     <- lm(AE_over4_pct ~ as.numeric(date), data = national_norm)
+slope_nat_raw  <- coef(lm_nat_raw)["as.numeric(date)"] * 365.25
+mean_nat       <- mean(national_norm$AE_over4_pct)
+slope_nat_pp <- slope_nat_raw
+
+# 3) Regional percent‐slopes
+regional_slopes <- plot_data_norm2 %>%
+  group_by(region_label) %>%
+  summarize(
+    slope_pp    = coef(lm(AE_over4_pct ~ day, data = cur_data()))["day"] * 365.25,
+    .groups     = "drop"
+  )
+
+# 4) Colours
+region_levels <- sort(unique(plot_data_norm2$region_label))
+region_cols   <- RColorBrewer::brewer.pal(length(region_levels), "Dark2")
+names(region_cols) <- region_levels
+
+# 5) Make-a-plot function
+make_region_plot <- function(reg) {
+  dat_reg <- filter(plot_data_norm2, region_label == reg)
+  pp_reg <- regional_slopes %>% filter(region_label == reg) %>% pull(slope_pp)
+  lab_reg <- sprintf("%+.2f pp/year", pp_reg)
+  lab_nat <- sprintf("%+.2f pp/year", slope_nat_pp)
+  
+  ggplot() +
+    # COVID band
+    geom_rect(
+      data        = covid_window,
+      aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+      inherit.aes = FALSE,
+      fill        = "#FF6666",
+      alpha       = 0.1
+    ) +
+    # regional raw line
+    geom_line(
+      data  = dat_reg,
+      aes(date, AE_over4_pct),
+      color = region_cols[reg],
+      size  = 0.8, alpha = 0.3
+    ) +
+    # regional %‐trend
+    geom_smooth(
+      data     = dat_reg,
+      aes(date, AE_over4_pct),
+      method   = "lm", se = FALSE,
+      linetype = "dashed",
+      color    = region_cols[reg],
+      size     = 1
+    ) +
+    # national %‐trend
+    geom_smooth(
+      data     = national_norm,
+      aes(date, AE_over4_pct),
+      method   = "lm", se = FALSE,
+      linetype = "solid",
+      color    = "black",
+      size     = 1.2
+    ) +
+    # annotate region %
+    annotate(
+      "text",
+      x     = max(dat_reg$date) - months(6),
+      y     = max(dat_reg$AE_over4_pct) * 0.90,
+      label = lab_reg,
+      hjust = 1, vjust = 7, size = 4, fontface = "bold",
+      color = region_cols[reg]
+    ) +
+    # annotate national %
+    annotate(
+      "text",
+      x     = max(dat_reg$date) - months(6),
+      y     = max(dat_reg$AE_over4_pct) * 0.80,
+      label = lab_nat,
+      hjust = 1, vjust = -7.5, size = 4, fontface = "bold",
+      color = "black"
+    ) +
+    # scales
+    scale_x_date(
+      name   = "Year",
+      date_breaks = "1 year",
+      date_labels = "%Y",
+      expand      = c(0, 0)
+    ) +
+    scale_y_continuous(
+      name   = "% A&E Attendances Over 4 Hours",
+      labels = function(x) paste0(x, "%"),
+      limits = c(0, 40),
+      expand = c(0, 0)
+    ) +
+    labs(title = reg)
+}
+
+# 6) Build and display each region’s plot
+plots_by_region <- map(region_levels, make_region_plot) %>%
+  set_names(region_levels)
+
+# 7) Show plost by region:
+print(plots_by_region[["London"]])
+print(plots_by_region[["East Of England"]])
+print(plots_by_region[["North East And Yorkshire"]])
+print(plots_by_region[["North West"]])
+print(plots_by_region[["Midlands"]])
+print(plots_by_region[["South West"]])
+print(plots_by_region[["South East"]])
+
+# ============================================================================================================
+# BOXPLOT AE ATTENDENCES OVER 4 HOURS BY REGION 
+# ============================================================================================================
+
+ggplot(plot_data, aes(x = region_label, y = AE_over4_pct, fill = region_label)) +
+  geom_boxplot(color = "black") +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_y_continuous(
+    limits = c(0, 40),
+    expand = c(0,0),
+    labels = function(x) paste0(x, "%")
+  ) +
+  labs(
+    title = "% A&E Attendances Over 4 Hours by Region",
+    x     = "Region",
+    y     = "% Attendances Over 4 Hours"
+  ) +
+  theme(legend.position = "none")
