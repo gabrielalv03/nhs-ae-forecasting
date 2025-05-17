@@ -1,0 +1,37 @@
+library(readxl)
+library(dplyr)
+library(lubridate)
+library(tidyr)
+
+# Step 1: Read column A starting from row 3 (A3 downward)
+holidays <- read_excel("~/Downloads/FYP/SOCIOECON/ukbankholidays-jul19.xls", 
+                       sheet = 1, range = cell_rows(3:10000), col_names = FALSE)
+
+# Step 2: Rename and parse date
+colnames(holidays) <- "holiday_date"
+holidays <- holidays %>%
+  mutate(holiday_date = as.Date(holiday_date))
+
+# Step 3: Filter from July 2015 onward
+holidays <- holidays %>%
+  filter(holiday_date >= as.Date("2015-07-01"))
+
+# Step 4: Create year-month key to match your main dataset
+holidays <- holidays %>%
+  mutate(month_key = floor_date(holiday_date, "month"))
+
+# Step 5: Count holidays per month
+holiday_counts <- holidays %>%
+  count(month_key, name = "bank_holiday_number")
+
+# Ensure time_date is properly formatted
+IMD_seasons_covidflu_data_nhs <- IMD_seasons_covidflu_data_nhs %>%
+  mutate(time_date = as.Date(time_date))  # in case it's not already a Date
+
+# Add month key and join
+IMD_seasons_covidflu_holiday_data_nhs <- IMD_seasons_covidflu_data_nhs %>%
+  mutate(month_key = floor_date(time_date, "month")) %>%
+  filter(month_key >= as.Date("2015-07-01") & month_key <= as.Date("2025-06-30")) %>%
+  left_join(holiday_counts, by = "month_key") %>%
+  mutate(bank_holiday_number = replace_na(bank_holiday_number, 0)) %>%
+  select(-month_key)
