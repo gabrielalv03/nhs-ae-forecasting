@@ -393,6 +393,18 @@ rf_over4_trust <- randomForest(
 # Step 3: Generate predictions
 rf_model_over4_trust_full$pred_rf_over4_trust <- predict(rf_over4_trust, newdata = rf_model_over4_trust_full)
 
+# Step: Calculate residuals
+rf_model_over4_trust_full$residuals <- rf_model_over4_trust_full$AE_over4_pct - rf_model_over4_trust_full$pred_rf_over4_trust
+
+# Step: Plot residual histogram (base R)
+hist(
+  rf_model_over4_trust_full$residuals,
+  breaks = 30,
+  main = "Residuals – RF Over 4h % (Region)",
+  xlab = "Residuals (Actual - Predicted)",
+  col = "lightblue",
+  border = "white")
+
 # Step 4: Plot
 plot(rf_model_over4_trust_full$AE_over4_pct, rf_model_over4_trust_full$pred_rf_over4_trust,
      main = "RF Over 4h % Predictions (Trust)",
