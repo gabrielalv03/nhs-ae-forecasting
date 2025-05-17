@@ -40,6 +40,18 @@ rf_attendance_region <- randomForest(
 # Step 3: Generate predictions
 rf_model_att_region_full$pred_rf_att_region <- predict(rf_attendance_region)
 
+# Step 3b: Calculate residuals
+rf_model_att_region_full$residuals <- rf_model_att_region_full$AE_att_tot - rf_model_att_region_full$pred_rf_att_region
+
+hist(
+  rf_model_att_region_full$residuals,
+  breaks = 30,
+  main = "Histogram of Residuals – RF Attendance (Region)",
+  xlab = "Residuals (Actual - Predicted)",
+  col = "lightblue",
+  border = "white"
+)
+
 # Step 4: Plot actual vs predicted
 plot(
   rf_model_att_region_full$AE_att_tot, rf_model_att_region_full$pred_rf_att_region,
