@@ -1,0 +1,19 @@
+# ADD SEASON TO NEW DATAFRAME
+
+library(dplyr)
+library(lubridate)
+
+# Convert "April 2016" to a Date object (default to first of the month)
+IMD_seasons_data_nhs <- clean_data %>%
+  mutate(
+    # Parse the text into a proper date (first day of the month)
+    time_date = dmy(paste("01", time_period)),  
+    month = month(time_date, label = TRUE, abbr = FALSE),
+    season = case_when(
+      month %in% c("December", "January", "February") ~ "Winter",
+      month %in% c("March", "April", "May") ~ "Spring",
+      month %in% c("June", "July", "August") ~ "Summer",
+      month %in% c("September", "October", "November") ~ "Autumn",
+      TRUE ~ NA_character_
+    )
+  )
