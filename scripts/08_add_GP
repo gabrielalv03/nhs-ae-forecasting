@@ -1,0 +1,40 @@
+library(readxl)
+library(dplyr)
+library(stringr)
+library(readxl)
+
+# Step 1: Load the GP patients Excel file
+gp_file_path <- "~/Downloads/FYP/SOCIOECON/patients_per_staff.xlsx"  # Update if needed
+gp_data <- read_excel(gp_file_path, sheet = "Sheet1")
+
+# Step 2: Filter for "All GPs" and clean
+gp_clean <- gp_data %>%
+  filter(`Staff type` == "All GPs") %>%
+  select(original_region = Region, gp_patients = `Oct 2022`)
+
+# Step 3: Map to NHS England regions
+region_mapping <- c(
+  "East Midlands" = "NHS England Midlands",
+  "West Midlands" = "NHS England Midlands",
+  "East of England" = "NHS England East Of England",
+  "London" = "NHS England London",
+  "North East" = "NHS England North East And Yorkshire",
+  "Yorkshire and The Humber" = "NHS England North East And Yorkshire",
+  "North West" = "NHS England North West",
+  "South East" = "NHS England South East",
+  "South West" = "NHS England South West"
+)
+
+gp_clean <- gp_clean %>%
+  mutate(region = dplyr::recode(original_region, !!!as.list(region_mapping))) %>%
+  group_by(region) %>%
+  summarise(gp_patients_per_gp = mean(gp_patients, na.rm = TRUE), .groups = "drop")  # average if merged
+
+# Step 4: Join into your main dataset
+full_social_nhs_data <- IMD_seasons_covidflu_weather_pop_data_nhs %>%
+  left_join(gp_clean, by = "region")
+
+cleaned_full_social_nhs_data <- full_social_nhs_data %>%
+  select(time_date, everything()) %>%
+  select(-month, -time_period.x, -file_name, -land_area_hectares, -land_area_km2, -year, -population)
+
