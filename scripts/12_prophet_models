@@ -13,7 +13,7 @@ train_data <- train_data %>%
 regions <- unique(train_data$region)
 
 # Store predicted vs actual
-prophet_fitted_values <- data.frame()
+prophet_fitted_values_att_region <- data.frame()
 
 for (r in regions) {
   message("Fitting Prophet model for: ", r)
@@ -36,16 +36,16 @@ for (r in regions) {
   fitted_df <- region_df %>%
     mutate(yhat = fitted$yhat, region = r)
   
-  prophet_fitted_values <- bind_rows(prophet_fitted_values, fitted_df)
+  prophet_fitted_values_att_region <- bind_rows(prophet_fitted_values_att_region, fitted_df)
 }
 
 # Find the common range for both axes
-lims <- range(c(prophet_fitted_values$y, prophet_fitted_values$yhat), na.rm = TRUE)
+lims <- range(c(prophet_fitted_values_att_region$y, prophet_fitted_values_att_region$yhat), na.rm = TRUE)
 
 # Plot with equal axis scales
 plot(
-  prophet_fitted_values$y,
-  prophet_fitted_values$yhat,
+  prophet_fitted_values_att_region$y,
+  prophet_fitted_values_att_region$yhat,
   main = "Prophet Predicted vs Actual (Regional A&E Attendance)",
   xlab = "Actual",
   ylab = "Predicted",
