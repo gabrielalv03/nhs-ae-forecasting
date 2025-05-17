@@ -164,6 +164,16 @@ plot(
 )
 abline(0, 1, col = "red", lty = 2)
 
+# STEP 4b: Run Stepwise Regression (both directions by default)
+lm_attendance_region_stepwise <- step(
+  lm_attendance_region,
+  direction = "both",  # options: "both", "forward", "backward"
+  trace = TRUE         # set to FALSE to suppress output
+)
+
+# Optional: view summary of final stepwise model
+summary(lm_attendance_region_stepwise)
+
 # LM Attendance by trust #
 # Load required libraries
 # install.packages("ggcorrplot")
@@ -306,6 +316,16 @@ plot(
   pch = 19, col = "darkblue"
 )
 abline(0, 1, col = "red", lty = 2)
+
+# STEP 4b: Run Stepwise Regression (both directions by default)
+lm_attendance_trust_stepwise <- step(
+  lm_attendance_trust,
+  direction = "both",  # options: "both", "forward", "backward"
+  trace = TRUE         # set to FALSE to suppress output
+)
+
+# Optional: view summary of final stepwise model
+summary(lm_attendance_trust_stepwise)
 
 # LM Waiting Times by region #
 # Load required libraries
@@ -451,6 +471,15 @@ plot(
 )
 abline(0, 1, col = "red", lty = 2)
 
+# STEP 4b: Run Stepwise Regression (both directions by default)
+lm_over4_region_stepwise <- step(
+  lm_over4_region,
+  direction = "both",  # options: "both", "forward", "backward"
+  trace = TRUE         # set to FALSE to suppress output
+)
+
+# Optional: view summary of final stepwise model
+summary(lm_over4_region_stepwise)
 
 # LM Waiting Times by trust #
 # Load required libraries
@@ -595,3 +624,13 @@ plot(
   pch = 19, col = "darkblue"
 )
 abline(0, 1, col = "red", lty = 2)
+
+# STEP 4b: Run Stepwise Regression (both directions by default)
+lm_over4_trust_stepwise <- step(
+  lm_over4_trust,
+  direction = "both",  # options: "both", "forward", "backward"
+  trace = TRUE         # set to FALSE to suppress output
+)
+
+# Optional: view summary of final stepwise model
+summary(lm_over4_trust_stepwise)
