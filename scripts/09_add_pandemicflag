@@ -1,0 +1,33 @@
+library(lubridate)
+library(dplyr)
+
+train_data <- cleaned_full_social_nhs_data %>%
+  mutate(
+    time_date = as.Date(time_date),
+    pandemic_flag = if_else(
+      time_date >= as.Date("2020-03-01") & time_date <= as.Date("2021-07-31"),
+      1, 0
+    )
+  )
+
+# 1. Extract 2023 population density by region
+pop_2023 <- train_data %>%
+  filter(year(time_date) == 2023, !is.na(population_density)) %>%
+  select(region, population_density) %>%
+  distinct()
+
+# 2. Join to fill in 2024 missing population_density
+train_data <- train_data %>%
+  left_join(
+    pop_2023,
+    by = "region",
+    suffix = c("", "_2023")
+  ) %>%
+  mutate(
+    population_density = if_else(
+      is.na(population_density) & year(time_date) == 2024,
+      population_density_2023,
+      population_density
+    )
+  ) %>%
+  select(-population_density_2023)
