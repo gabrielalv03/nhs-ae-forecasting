@@ -141,6 +141,18 @@ rf_attendance_trust <- randomForest(
 # Step 4: Add predictions
 rf_model_att_trust_full$pred_rf_att_trust <- predict(rf_attendance_trust, newdata = rf_model_att_trust_full)
 
+# Step 4b: Calculate residuals
+rf_model_att_trust_full$residuals <- rf_model_att_trust_full$AE_att_tot - rf_model_att_trust_full$pred_rf_att_trust
+
+hist(
+  rf_model_att_trust_full$residuals,
+  breaks = 30,
+  main = "Histogram of Residuals – RF Attendance (Trust)",
+  xlab = "Residuals (Actual - Predicted)",
+  col = "lightblue",
+  border = "white"
+)
+
 # Step 5: Prediction plot
 plot(
   rf_model_att_trust_full$AE_att_tot,
