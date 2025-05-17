@@ -1,1 +1,597 @@
+# LM Attendance by region #
+# Load required libraries
+# install.packages("ggcorrplot")
+# install.packages("car")
+# install.packages("dplyr")
+library(ggcorrplot)
+library(car)
+library(dplyr)
 
+# === Set standard theme ===
+theme_nhs <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title.position = "plot",
+    plot.title          = element_text(hjust = 0.5, face = "bold"),
+    legend.position     = "bottom",
+    legend.key          = element_rect(fill = "white", linewidth = 0),
+    axis.text.x         = element_text(angle = 30, hjust = 1),
+    axis.text.y         = element_text(),
+    axis.title.x        = element_text(size = 14),
+    axis.title.y        = element_text(size = 14),
+    panel.grid.major    = element_line(color = "grey80", linewidth = 0.3),
+    panel.grid.minor    = element_blank(),
+    panel.border        = element_rect(color = "grey80", fill = NA, linewidth = 0.3)
+  )
+
+theme_set(theme_nhs)
+
+
+# STEP 1: Define full set of predictors
+vars_model_A <- c(
+  "AE_att_tot", "weighted_imd", "season", "flu_percent", "covid_percent",
+  "bank_holiday_number", "temperature", "population_density", 
+  "gp_patients_per_gp", "region", "pandemic_flag", "time_date"
+)
+
+friendly_names <- c(
+  weighted_imd = "Deprivation Score",
+  season = "Season",
+  flu_percent = "Flu Positivity Rate",
+  covid_percent = "COVID-19 Positivity Rate",
+  bank_holiday_number = "Bank Holidays",
+  temperature = "Temperature (°C)",
+  population_density = "Population Density",
+  gp_patients_per_gp = "Patients per GP",
+  region = "NHS Region",
+  pandemic_flag = "Pandemic",
+  time_date = "Date"
+)
+
+# STEP 2: Prepare model_data_full with all dates (some NAs allowed)
+lm_model_att_region_full <- train_data %>%
+  select(all_of(vars_model_A)) %>%
+  mutate(
+    AE_att_tot = as.numeric(AE_att_tot),
+    season = as.factor(season),
+    region = as.factor(region),
+    pandemic_flag = as.factor(pandemic_flag),
+    time_date = as.Date(time_date)
+  ) %>%
+  group_by(region, time_date) %>%
+  summarise(
+    AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
+    weighted_imd = mean(weighted_imd, na.rm = TRUE),
+    flu_percent = mean(flu_percent, na.rm = TRUE),
+    covid_percent = mean(covid_percent, na.rm = TRUE),
+    bank_holiday_number = mean(bank_holiday_number, na.rm = TRUE),
+    temperature = mean(temperature, na.rm = TRUE),
+    population_density = mean(population_density, na.rm = TRUE),
+    gp_patients_per_gp = mean(gp_patients_per_gp, na.rm = TRUE),
+    season = first(season),
+    pandemic_flag = first(pandemic_flag),
+    .groups = "drop"
+  )
+
+# STEP 3: Filter to rows with complete data for full model
+lm_model_att_region_anova <- lm_model_att_region_full %>%
+  filter(if_all(everything(), ~ !is.na(.)))
+
+# STEP 4: Fit full linear model including population_density
+lm_attendance_region <- lm(
+  AE_att_tot ~ weighted_imd + season + flu_percent + covid_percent +
+    bank_holiday_number + temperature + population_density + gp_patients_per_gp +
+    region + pandemic_flag + time_date,
+  data = lm_model_att_region_anova
+)
+
+# STEP 5: Multicollinearity diagnostics
+
+# Correlation matrix (excluding AE_att_tot)
+# Prepare numeric data
+numeric_data <- lm_model_att_region_anova %>%
+  select(where(is.numeric)) %>%
+  select(-AE_att_tot)
+
+# Compute correlation matrix
+corr_matrix <- round(cor(numeric_data, use = "pairwise.complete.obs"), 2)
+
+# Apply friendly names
+common_vars <- intersect(names(friendly_names), colnames(corr_matrix))
+colnames(corr_matrix)[match(common_vars, colnames(corr_matrix))] <- friendly_names[common_vars]
+rownames(corr_matrix)[match(common_vars, rownames(corr_matrix))] <- friendly_names[common_vars]
+
+# Plot with 30° tick labels
+ggcorrplot(
+  corr_matrix,
+  hc.order = TRUE,
+  type = "lower",
+  lab = TRUE,
+  tl.srt = 30
+) +
+  ggtitle("Correlation Between Predictor Variables") +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14)
+  ) 
+
+# STEP 6: Based on multicollinearity concerns, refit without population_density
+lm_attendance_region2 <- lm(
+  AE_att_tot ~ weighted_imd + season + flu_percent + covid_percent +
+    bank_holiday_number + temperature + gp_patients_per_gp +
+    region + pandemic_flag + time_date,
+  data = lm_model_att_region_anova
+)
+
+# STEP 7: Compare models via ANOVA
+anova(lm_attendance_region2, lm_attendance_region)
+anova_results <- anova(lm_attendance_region2, lm_attendance_region)
+
+# STEP 8: Residual diagnostics
+
+# Full model
+hist(
+  lm_attendance_region$residuals,
+  main = "Residuals - Model A",
+  xlab = "Residuals"
+)
+qqnorm(lm_attendance_region$residuals, main = "Q-Q Plot - Model A")
+qqline(lm_attendance_region$residuals, col = "red")
+
+# Reduced model
+hist(
+  lm_attendance_region2$residuals,
+  main = "Residuals - Model A2",
+  xlab = "Residuals"
+)
+qqnorm(lm_attendance_region2$residuals, main = "Q-Q Plot - Model A2")
+qqline(lm_attendance_region2$residuals, col = "blue")
+
+# STEP 9: Model summaries
+sum_lm_attendance_region <- summary(lm_attendance_region)
+sum_lm_attendance_region2 <- summary(lm_attendance_region2)
+
+# Print to console
+print(sum_lm_attendance_region)
+print(sum_lm_attendance_region2)
+
+# STEP 10: Plot predicted vs actual (using full model)
+plot(
+  lm_model_att_region_anova$AE_att_tot, predict(lm_attendance_region),
+  xlab = "Actual A&E Attendances",
+  ylab = "Predicted A&E Attendances",
+  main = "Predicted vs Actual - Model A",
+  pch = 19, col = "darkblue"
+)
+abline(0, 1, col = "red", lty = 2)
+
+# LM Attendance by trust #
+# Load required libraries
+# install.packages("ggcorrplot")
+# install.packages("car")
+# install.packages("dplyr")
+library(ggcorrplot)
+library(car)
+library(dplyr)
+
+# STEP 1: Define full set of predictors
+vars_model_A <- c(
+  "AE_att_tot", "weighted_imd", "season", "flu_percent", "covid_percent",
+  "bank_holiday_number", "temperature", "population_density", 
+  "gp_patients_per_gp", "name", "pandemic_flag", "time_date"
+)
+
+friendly_names <- c(
+  weighted_imd = "Deprivation Score",
+  season = "Season",
+  flu_percent = "Flu Positivity Rate",
+  covid_percent = "COVID-19 Positivity Rate",
+  bank_holiday_number = "Bank Holidays",
+  temperature = "Temperature (°C)",
+  population_density = "Population Density",
+  gp_patients_per_gp = "Patients per GP",
+  region = "NHS Region",
+  pandemic_flag = "Pandemic",
+  time_date = "Date"
+)
+
+# STEP 2: Prepare lm_model_att_trust_full with all dates (some NAs allowed)
+lm_model_att_trust_full <- train_data %>%
+  select(all_of(vars_model_A)) %>%
+  mutate(
+    AE_att_tot = as.numeric(AE_att_tot),
+    season = as.factor(season),
+    name = as.factor(name),
+    pandemic_flag = as.factor(pandemic_flag),
+    time_date = as.Date(time_date)
+  ) %>%
+  group_by(name, time_date) %>%
+  summarise(
+    AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
+    weighted_imd = mean(weighted_imd, na.rm = TRUE),
+    flu_percent = mean(flu_percent, na.rm = TRUE),
+    covid_percent = mean(covid_percent, na.rm = TRUE),
+    bank_holiday_number = mean(bank_holiday_number, na.rm = TRUE),
+    temperature = mean(temperature, na.rm = TRUE),
+    population_density = mean(population_density, na.rm = TRUE),
+    gp_patients_per_gp = mean(gp_patients_per_gp, na.rm = TRUE),
+    season = first(season),
+    pandemic_flag = first(pandemic_flag),
+    .groups = "drop"
+  )
+
+# STEP 3: Filter to rows with complete data for full model
+lm_model_att_trust_anova <- lm_model_att_trust_full %>%
+  filter(if_all(everything(), ~ !is.na(.)))
+
+# STEP 4: Fit full linear model including population_density
+lm_attendance_trust <- lm(
+  AE_att_tot ~ weighted_imd + season + flu_percent + covid_percent +
+    bank_holiday_number + temperature + population_density + gp_patients_per_gp +
+    name + pandemic_flag + time_date,
+  data = lm_model_att_trust_anova
+)
+
+# STEP 5: Multicollinearity diagnostics
+
+# Correlation matrix (excluding AE_att_tot)
+numeric_data <- lm_model_att_trust_anova %>%
+  select(where(is.numeric)) %>%
+  select(-AE_att_tot)
+corr_matrix <- round(cor(numeric_data, use = "pairwise.complete.obs"), 2)
+
+# Apply friendly names
+common_vars <- intersect(names(friendly_names), colnames(corr_matrix))
+colnames(corr_matrix)[match(common_vars, colnames(corr_matrix))] <- friendly_names[common_vars]
+rownames(corr_matrix)[match(common_vars, rownames(corr_matrix))] <- friendly_names[common_vars]
+
+ggcorrplot(
+  corr_matrix,
+  hc.order = TRUE,
+  type = "lower",
+  lab = TRUE,
+  tl.srt = 30
+) +
+  ggtitle("Correlation Between Predictor Variables") +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14)
+  ) 
+
+# STEP 6: Based on multicollinearity concerns, refit without population_density
+lm_attendance_trust2 <- lm(
+  AE_att_tot ~ weighted_imd + season + flu_percent + covid_percent +
+    bank_holiday_number + temperature + gp_patients_per_gp +
+    name + pandemic_flag + time_date,
+  data = lm_model_att_trust_anova
+)
+
+# STEP 7: Compare models via ANOVA
+anova(lm_attendance_trust2, lm_attendance_trust)
+anova_results <- anova(lm_attendance_trust2, lm_attendance_trust)
+
+# STEP 8: Residual diagnostics
+
+# Full model
+hist(
+  lm_attendance_trust$residuals,
+  main = "Residuals - Model A",
+  xlab = "Residuals"
+)
+qqnorm(lm_attendance_trust$residuals, main = "Q-Q Plot - Model A")
+qqline(lm_attendance_trust$residuals, col = "red")
+
+# Reduced model
+hist(
+  lm_attendance_trust2$residuals,
+  main = "Residuals - Model A2",
+  xlab = "Residuals"
+)
+qqnorm(lm_attendance_trust2$residuals, main = "Q-Q Plot - Model A2")
+qqline(lm_attendance_trust2$residuals, col = "blue")
+
+# STEP 9: Model summaries
+sum_lm_attendance_trust <- summary(lm_attendance_trust)
+sum_lm_attendance_trust2 <- summary(lm_attendance_trust2)
+
+# Print to console
+print(sum_lm_attendance_trust)
+print(sum_lm_attendance_trust2)
+
+# STEP 10: Plot predicted vs actual (using full model)
+plot(
+  lm_model_att_trust_anova$AE_att_tot, predict(lm_attendance_trust),
+  xlab = "Actual A&E Attendances",
+  ylab = "Predicted A&E Attendances",
+  main = "Predicted vs Actual - Model A",
+  pch = 19, col = "darkblue"
+)
+abline(0, 1, col = "red", lty = 2)
+
+# LM Waiting Times by region #
+# Load required libraries
+# install.packages("ggcorrplot")
+# install.packages("car")
+# install.packages("dplyr")
+library(ggcorrplot)
+library(car)
+library(dplyr)
+
+# STEP 1: Define full set of predictors
+vars_model_A <- c(
+  "AE_per4_all", "weighted_imd", "season", "flu_percent", "covid_percent",
+  "bank_holiday_number", "temperature", "population_density", 
+  "gp_patients_per_gp", "region", "pandemic_flag", "time_date"
+)
+
+friendly_names <- c(
+  weighted_imd = "Deprivation Score",
+  season = "Season",
+  flu_percent = "Flu Positivity Rate",
+  covid_percent = "COVID-19 Positivity Rate",
+  bank_holiday_number = "Bank Holidays",
+  temperature = "Temperature (°C)",
+  population_density = "Population Density",
+  gp_patients_per_gp = "Patients per GP",
+  region = "NHS Region",
+  pandemic_flag = "Pandemic",
+  time_date = "Date"
+)
+
+# STEP 2: Prepare lm_model_over4_region_full with all dates (some NAs allowed)
+lm_model_over4_region_full <- train_data %>%
+  select(all_of(vars_model_A)) %>%
+  mutate(
+    AE_per4_all = as.numeric(AE_per4_all),
+    season = as.factor(season),
+    region = as.factor(region),
+    pandemic_flag = as.factor(pandemic_flag),
+    time_date = as.Date(time_date)
+  ) %>%
+  group_by(region, time_date) %>%
+  summarise(
+    AE_per4_all = mean(AE_per4_all, na.rm = TRUE),
+    weighted_imd = mean(weighted_imd, na.rm = TRUE),
+    flu_percent = mean(flu_percent, na.rm = TRUE),
+    covid_percent = mean(covid_percent, na.rm = TRUE),
+    bank_holiday_number = mean(bank_holiday_number, na.rm = TRUE),
+    temperature = mean(temperature, na.rm = TRUE),
+    population_density = mean(population_density, na.rm = TRUE),
+    gp_patients_per_gp = mean(gp_patients_per_gp, na.rm = TRUE),
+    season = first(season),
+    pandemic_flag = first(pandemic_flag),
+    .groups = "drop"
+  )
+
+# STEP 3: Filter to rows with complete data for full model
+lm_model_over4_region_anova <- lm_model_over4_region_full %>%
+  filter(if_all(everything(), ~ !is.na(.)))
+
+# STEP 4: Fit full linear model including population_density
+lm_over4_region <- lm(
+  AE_per4_all ~ weighted_imd + season + flu_percent + covid_percent +
+    bank_holiday_number + temperature + population_density + gp_patients_per_gp +
+    region + pandemic_flag + time_date,
+  data = lm_model_over4_region_anova
+)
+
+# STEP 5: Multicollinearity diagnostics
+
+# Correlation matrix (excluding AE_per4_all)
+numeric_data <- lm_model_over4_region_anova %>%
+  select(where(is.numeric)) %>%
+  select(-AE_per4_all)
+corr_matrix <- round(cor(numeric_data, use = "pairwise.complete.obs"), 2)
+
+# Apply friendly names
+common_vars <- intersect(names(friendly_names), colnames(corr_matrix))
+colnames(corr_matrix)[match(common_vars, colnames(corr_matrix))] <- friendly_names[common_vars]
+rownames(corr_matrix)[match(common_vars, rownames(corr_matrix))] <- friendly_names[common_vars]
+
+# Plot with 30° tick labels
+ggcorrplot(
+  corr_matrix,
+  hc.order = TRUE,
+  type = "lower",
+  lab = TRUE,
+  tl.srt = 30
+) +
+  ggtitle("Correlation Between Predictor Variables") +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14)
+  ) 
+
+# STEP 6: Based on multicollinearity concerns, refit without population_density
+lm_over4_region2 <- lm(
+  AE_per4_all ~ weighted_imd + season + flu_percent + covid_percent +
+    bank_holiday_number + temperature + gp_patients_per_gp +
+    region + pandemic_flag + time_date,
+  data = lm_model_over4_region_anova
+)
+
+# STEP 7: Compare models via ANOVA
+anova(lm_over4_region2, lm_over4_region)
+anova_results <- anova(lm_over4_region2, lm_over4_region)
+
+# STEP 8: Residual diagnostics
+
+# Full model
+hist(
+  lm_over4_region$residuals,
+  main = "Residuals - Model A",
+  xlab = "Residuals"
+)
+qqnorm(lm_over4_region$residuals, main = "Q-Q Plot - Model A")
+qqline(lm_over4_region$residuals, col = "red")
+
+# Reduced model
+hist(
+  lm_over4_region2$residuals,
+  main = "Residuals - Model A2",
+  xlab = "Residuals"
+)
+qqnorm(lm_over4_region2$residuals, main = "Q-Q Plot - Model A2")
+qqline(lm_over4_region2$residuals, col = "blue")
+
+# STEP 9: Model summaries
+sum_lm_over4_region <- summary(lm_over4_region)
+sum_lm_over4_region2 <- summary(lm_over4_region2)
+
+# Print to console
+print(sum_lm_over4_region)
+print(sum_lm_over4_region2)
+
+# STEP 10: Plot predicted vs actual (using full model)
+plot(
+  lm_model_over4_region_anova$AE_per4_all, predict(lm_over4_region),
+  xlab = "Actual A&E Attendances",
+  ylab = "Predicted A&E Attendances",
+  main = "Predicted vs Actual - Model A",
+  pch = 19, col = "darkblue"
+)
+abline(0, 1, col = "red", lty = 2)
+
+
+# LM Waiting Times by trust #
+# Load required libraries
+# install.packages("ggcorrplot")
+# install.packages("car")
+# install.packages("dplyr")
+library(ggcorrplot)
+library(car)
+library(dplyr)
+
+# STEP 1: Define full set of predictors
+vars_model_A <- c(
+  "AE_per4_all", "weighted_imd", "season", "flu_percent", "covid_percent",
+  "bank_holiday_number", "temperature", "population_density", 
+  "gp_patients_per_gp", "name", "pandemic_flag", "time_date"
+)
+
+friendly_names <- c(
+  weighted_imd = "Deprivation Score",
+  season = "Season",
+  flu_percent = "Flu Positivity Rate",
+  covid_percent = "COVID-19 Positivity Rate",
+  bank_holiday_number = "Bank Holidays",
+  temperature = "Temperature (°C)",
+  population_density = "Population Density",
+  gp_patients_per_gp = "Patients per GP",
+  region = "NHS Region",
+  pandemic_flag = "Pandemic",
+  time_date = "Date"
+)
+
+# STEP 2: Prepare lm_model_over4_trust_full with all dates (some NAs allowed)
+lm_model_over4_trust_full <- train_data %>%
+  select(all_of(vars_model_A)) %>%
+  mutate(
+    AE_per4_all = as.numeric(AE_per4_all),
+    season = as.factor(season),
+    name = as.factor(name),
+    pandemic_flag = as.factor(pandemic_flag),
+    time_date = as.Date(time_date)
+  ) %>%
+  group_by(name, time_date) %>%
+  summarise(
+    AE_per4_all = mean(AE_per4_all, na.rm = TRUE),
+    weighted_imd = mean(weighted_imd, na.rm = TRUE),
+    flu_percent = mean(flu_percent, na.rm = TRUE),
+    covid_percent = mean(covid_percent, na.rm = TRUE),
+    bank_holiday_number = mean(bank_holiday_number, na.rm = TRUE),
+    temperature = mean(temperature, na.rm = TRUE),
+    population_density = mean(population_density, na.rm = TRUE),
+    gp_patients_per_gp = mean(gp_patients_per_gp, na.rm = TRUE),
+    season = first(season),
+    pandemic_flag = first(pandemic_flag),
+    .groups = "drop"
+  )
+
+# STEP 3: Filter to rows with complete data for full model
+lm_model_over4_trust_anova <- lm_model_over4_trust_full %>%
+  filter(if_all(everything(), ~ !is.na(.)))
+
+# STEP 4: Fit full linear model including population_density
+lm_over4_trust <- lm(
+  AE_per4_all ~ weighted_imd + season + flu_percent + covid_percent +
+    bank_holiday_number + temperature + population_density + gp_patients_per_gp +
+    name + pandemic_flag + time_date,
+  data = lm_model_over4_trust_anova
+)
+
+# STEP 5: Multicollinearity diagnostics
+
+# Correlation matrix (excluding AE_per4_all)
+numeric_data <- lm_model_over4_trust_anova %>%
+  select(where(is.numeric)) %>%
+  select(-AE_per4_all)
+corr_matrix <- round(cor(numeric_data, use = "pairwise.complete.obs"), 2)
+
+# Apply friendly names
+common_vars <- intersect(names(friendly_names), colnames(corr_matrix))
+colnames(corr_matrix)[match(common_vars, colnames(corr_matrix))] <- friendly_names[common_vars]
+rownames(corr_matrix)[match(common_vars, rownames(corr_matrix))] <- friendly_names[common_vars]
+
+# Plot with 30° tick labels
+ggcorrplot(
+  corr_matrix,
+  hc.order = TRUE,
+  type = "lower",
+  lab = TRUE,
+  tl.srt = 30
+) +
+  ggtitle("Correlation Between Predictor Variables") +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14)
+  ) 
+
+# STEP 6: Based on multicollinearity concerns, refit without population_density
+lm_over4_trust2 <- lm(
+  AE_per4_all ~ weighted_imd + season + flu_percent + covid_percent +
+    bank_holiday_number + temperature + gp_patients_per_gp +
+    name + pandemic_flag + time_date,
+  data = lm_model_over4_trust_anova
+)
+
+# STEP 7: Compare models via ANOVA
+anova(lm_over4_trust2, lm_over4_trust)
+anova_results <- anova(lm_over4_trust2, lm_over4_trust)
+
+# STEP 8: Residual diagnostics
+
+# Full model
+hist(
+  lm_over4_trust$residuals,
+  main = "Residuals - Model A",
+  xlab = "Residuals"
+)
+qqnorm(lm_over4_trust$residuals, main = "Q-Q Plot - Model A")
+qqline(lm_over4_trust$residuals, col = "red")
+
+# Reduced model
+hist(
+  lm_over4_trust2$residuals,
+  main = "Residuals - Model A2",
+  xlab = "Residuals"
+)
+qqnorm(lm_over4_trust2$residuals, main = "Q-Q Plot - Model A2")
+qqline(lm_over4_trust2$residuals, col = "blue")
+
+# STEP 9: Model summaries
+sum_lm_over4_trust <- summary(lm_over4_trust)
+sum_lm_over4_trust2 <- summary(lm_over4_trust2)
+
+# Print to console
+print(sum_lm_over4_trust)
+print(sum_lm_over4_trust2)
+
+# STEP 10: Plot predicted vs actual (using full model)
+plot(
+  lm_model_over4_trust_anova$AE_per4_all, predict(lm_over4_trust),
+  xlab = "Actual A&E Attendances",
+  ylab = "Predicted A&E Attendances",
+  main = "Predicted vs Actual - Model A",
+  pch = 19, col = "darkblue"
+)
+abline(0, 1, col = "red", lty = 2)
