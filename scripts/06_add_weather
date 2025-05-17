@@ -1,0 +1,64 @@
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(lubridate)
+library(purrr)
+
+# Function to read and reshape a single weather Excel file
+read_weather_file <- function(file_path, region_name) {
+  sheet_to_use <- excel_sheets(file_path)[1]  # Always take the first sheet
+  
+  read_excel(file_path, sheet = sheet_to_use, skip = 5) %>%
+    filter(!is.na(year) & year >= 2015 & year <= 2025) %>%  # Avoid summary rows
+    select(year, matches("^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$", ignore.case = TRUE)) %>%
+    pivot_longer(
+      cols = matches("^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)$", ignore.case = TRUE),
+      names_to = "month",
+      values_to = "temperature"
+    ) %>%
+    mutate(
+      month = tolower(month),
+      month_num = match(month, tolower(month.abb)),
+      date = as.Date(sprintf("%d-%02d-01", year, month_num)),
+      region = region_name
+    ) %>%
+    group_by(region, date) %>%
+    summarise(temperature = mean(temperature, na.rm = TRUE), .groups = "drop")
+}
+
+# Folder where the Excel files are
+weather_folder <- "~/Downloads/FYP/SOCIOECON"
+
+# Mapping of filenames to NHS regions
+weather_files <- c(
+  "NHS England South East.xlsx" =  "NHS England South East",
+  "NHS England London.xlsx" = "NHS England London",
+  "NHS England South West.xlsx" = "NHS England South West",
+  "NHS England North West.xlsx" = "NHS England North West",
+  "NHS England North East And Yorkshire.xlsx" = "NHS England North East And Yorkshire",
+  "NHS England Midlands.xlsx" = "NHS England Midlands",
+  "NHS England East of England.xlsx" = "NHS England East Of England"
+)
+
+# Read and combine all weather data
+weather_data <- imap_dfr(weather_files, function(region_name, file_name) {
+  file_path <- file.path(weather_folder, file_name)
+  read_weather_file(file_path, region_name)
+})
+
+IMD_seasons_covidflu_holiday_data_nhs <- IMD_seasons_covidflu_holiday_data_nhs %>%
+  mutate(
+    time_date = as.Date(time_date),
+    region = str_trim(region)
+  )
+
+weather_data <- weather_data %>%
+  mutate(
+    date = as.Date(date),
+    region = str_trim(region)
+  )
+
+# Join with your main dataset
+IMD_seasons_covidflu_weather_data_nhs <- IMD_seasons_covidflu_holiday_data_nhs %>%
+  left_join(weather_data, by = c("region", "time_date" = "date"))
