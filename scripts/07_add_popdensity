@@ -1,0 +1,72 @@
+library(readxl)
+library(dplyr)
+library(stringr)
+library(lubridate)
+
+# === 1. Define file and sheet ===
+population_file <- "~/Downloads/FYP/SOCIOECON/population_data.xlsx"  # Adjust path
+sheet_name <- "Table 4"  # Replace with actual sheet name
+
+# === 2. Define region mapping ===
+region_mapping <- c(
+  "North East" = "NHS England North East And Yorkshire",
+  "Yorkshire and The Humber" = "NHS England North East And Yorkshire",
+  "North West" = "NHS England North West",
+  "East Midlands" = "NHS England Midlands",
+  "West Midlands" = "NHS England Midlands",
+  "East" = "NHS England East Of England",
+  "London" = "NHS England London",
+  "South East" = "NHS England South East",
+  "South West" = "NHS England South West",
+  "Wales" = NA_character_  # exclude from NHS England
+)
+
+# === 3. Read the population data ===
+population_raw <- read_excel(population_file, sheet = sheet_name, skip = 1)
+
+# === 4. Clean and map to NHS region ===
+population_clean <- population_raw %>%
+  mutate(
+    region = dplyr::recode(Regions, !!!as.list(region_mapping)),
+    year = as.numeric(Year)
+  ) %>%
+  filter(!is.na(region), year >= 2015) %>%
+  group_by(region, year) %>%
+  summarise(population = sum(`All Persons`, na.rm = TRUE), .groups = "drop")
+
+IMD_seasons_covidflu_weather_data_nhs <- IMD_seasons_covidflu_weather_data_nhs %>%
+  mutate(year = year(time_date))
+
+IMD_seasons_covidflu_weather_pop_data_nhs <- IMD_seasons_covidflu_weather_data_nhs %>%
+  left_join(population_clean, by = c("region", "year"))
+
+
+# === Done ===
+# View result
+IMD_seasons_covidflu_weather_pop_data_nhs %>%
+  select(region, time_date, year, population) %>%
+  filter(!is.na(population)) %>%
+  head()
+
+library(readxl)
+library(dplyr)
+
+# Step 1: Load land area Excel file (adjust path and sheet name if needed)
+land_area_path <- "~/Downloads/FYP/SOCIOECON/nhs_region_land_area.xlsx"  # replace with actual filename
+land_area_data <- read_excel(land_area_path)
+
+# Step 2: Clean and select relevant columns
+land_area_clean <- land_area_data %>%
+  select(region = `region`, land_area_hectares = AREAEHECT) %>%
+  mutate(
+    region = trimws(region),
+    land_area_km2 = land_area_hectares / 100  # 1 km² = 100 hectares
+  )
+
+
+# Step 3: Join to main dataset and compute population density
+IMD_seasons_covidflu_weather_pop_data_nhs <- IMD_seasons_covidflu_weather_pop_data_nhs %>%
+  left_join(land_area_clean, by = "region") %>%
+  mutate(
+    population_density = population / land_area_km2
+  )
