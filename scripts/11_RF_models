@@ -1,449 +1,114 @@
-# RF Attendance by region #
+library(dplyr)
 library(randomForest)
 
-# Step 1: Aggregate data by region, date, and season
-rf_model_att_region_full <- train_data %>%
-  mutate(across(where(is.character), ~ na_if(., "-"))) %>%
-  mutate(
-    AE_att_tot = as.numeric(AE_att_tot),
-    flu_percent = as.numeric(flu_percent),
-    covid_percent = as.numeric(covid_percent),
-    bank_holiday_number = as.numeric(bank_holiday_number),
-    temperature = as.numeric(temperature),
-    population_density = as.numeric(population_density),
-    gp_patients_per_gp = as.numeric(gp_patients_per_gp)
-  ) %>%
-  group_by(region, time_date, season) %>%
-  summarise(
-    AE_att_tot = mean(AE_att_tot, na.rm = TRUE),  # total regional attendance
-    weighted_imd = mean(weighted_imd, na.rm = TRUE),
-    flu_percent = mean(flu_percent, na.rm = TRUE),
-    covid_percent = mean(covid_percent, na.rm = TRUE),
-    bank_holiday_number = mean(bank_holiday_number, na.rm = TRUE),
-    temperature = mean(temperature, na.rm = TRUE),
-    population_density = mean(population_density, na.rm = TRUE),
-    gp_patients_per_gp = mean(gp_patients_per_gp, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  filter(if_all(everything(), ~ !is.na(.))) %>%
-  mutate(season = as.factor(season))
-
-# Step 2: Train the region-level random forest model
-rf_attendance_region <- randomForest(
-  AE_att_tot ~ weighted_imd + season + flu_percent + covid_percent + 
-    bank_holiday_number + temperature + population_density + gp_patients_per_gp,
-  data = rf_model_att_region_full,
-  ntree = 500,
-  importance = TRUE
+# === Common predictor groups ===
+numeric_predictors <- c(
+  "weighted_imd", "flu_percent", "covid_percent",
+  "bank_holiday_number", "temperature", "population_density",
+  "gp_patients_per_gp"
 )
 
-# Step 3: Generate predictions
-rf_model_att_region_full$pred_rf_att_region <- predict(rf_attendance_region)
+categorical_predictors <- c("season")
 
-# Step 3b: Calculate residuals
-rf_model_att_region_full$residuals <- rf_model_att_region_full$AE_att_tot - rf_model_att_region_full$pred_rf_att_region
-
-hist(
-  rf_model_att_region_full$residuals,
-  breaks = 30,
-  main = "Histogram of Residuals – RF Attendance (Region)",
-  xlab = "Residuals (Actual - Predicted)",
-  col = "lightblue",
-  border = "white"
-)
-
-# Step 4: Plot actual vs predicted
-plot(
-  rf_model_att_region_full$AE_att_tot, rf_model_att_region_full$pred_rf_att_region,
-  main = "Random Forest Predictions: Total A&E Attendances by Region",
-  xlab = "Actual", ylab = "Predicted"
-)
-abline(0, 1, col = "red")
-abline(lm(pred_rf_att_region ~ AE_att_tot, data = rf_model_att_region_full), col = "blue", lwd = 2)
-
-# Step 5: Model summary
-print(rf_attendance_region)
-importance(rf_attendance_region)
-
-# Step 6: Variable importance plot
-var_imp_rf_att_region <- importance(rf_attendance_region)
-var_imp_rf_att_region_df <- as.data.frame(var_imp_rf_att_region)
-var_imp_rf_att_region_df$Variable <- rownames(var_imp_rf_att_region_df)
-var_imp_rf_att_region_df$Label <- ifelse(
-  var_imp_rf_att_region_df$Variable %in% names(friendly_names),
-  friendly_names[var_imp_rf_att_region_df$Variable],
-  var_imp_rf_att_region_df$Variable
-)
-
-ggplot(var_imp_rf_att_region_df, aes(x = reorder(Label, `%IncMSE`), y = `%IncMSE`)) +
-  geom_col(fill = "steelblue") +
-  coord_flip() +
-  labs(
-    title = "Variable Importance – Random Forest (Regional A&E Attendances)",
-    x = "Predictor",
-    y = "% Increase in MSE"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 1, face = "bold", size = 14),
-    axis.title = element_text(size = 13),
-    axis.text = element_text(size = 12)
-  )
-
-# RF Attendance by trust #
-# Load libraries
-library(dplyr)
-library(lubridate)
-library(ggplot2)
-library(randomForest)
-
-# Friendly names for plotting
-friendly_names <- c(
-  weighted_imd = "Deprivation Score",
-  season = "Season",
-  flu_percent = "Flu Positivity Rate",
-  covid_percent = "COVID-19 Positivity Rate",
-  bank_holiday_number = "Bank Holidays",
-  temperature = "Temperature (°C)",
-  population_density = "Population Density",
-  gp_patients_per_gp = "Patients per GP",
-  region = "NHS Region",
-  pandemic_flag = "Pandemic",
-  time_date = "Date"
-)
-
-# Step 1: Filter rows with no missing values in relevant variables
-rf_model_att_trust_full <- train_data %>%
-  select(
-    AE_att_tot, weighted_imd, season, flu_percent, covid_percent,
-    bank_holiday_number, temperature, population_density, gp_patients_per_gp
-  ) %>%
-  filter(
-    if_all(everything(), ~ !is.na(.))
-  )
-
-# Step 2: Ensure correct variable types
-rf_model_att_trust_full <- rf_model_att_trust_full %>%
-  mutate(
-    AE_att_tot = as.numeric(AE_att_tot),
-    season = as.factor(season)
-  )
-
-# Step 3: Train the random forest model
-rf_attendance_trust <- randomForest(
-  AE_att_tot ~ weighted_imd + season + flu_percent + covid_percent + 
-    bank_holiday_number + temperature + population_density + gp_patients_per_gp,
-  data = rf_model_att_trust_full,
-  ntree = 500,
-  importance = TRUE
-)
-
-# Step 4: Add predictions
-rf_model_att_trust_full$pred_rf_att_trust <- predict(rf_attendance_trust, newdata = rf_model_att_trust_full)
-
-# Step 4b: Calculate residuals
-rf_model_att_trust_full$residuals <- rf_model_att_trust_full$AE_att_tot - rf_model_att_trust_full$pred_rf_att_trust
-
-hist(
-  rf_model_att_trust_full$residuals,
-  breaks = 30,
-  main = "Histogram of Residuals – RF Attendance (Trust)",
-  xlab = "Residuals (Actual - Predicted)",
-  col = "lightblue",
-  border = "white"
-)
-
-# Step 5: Prediction plot
-plot(
-  rf_model_att_trust_full$AE_att_tot,
-  rf_model_att_trust_full$pred_rf_att_trust,
-  main = "RF Attendance Predictions (Trust)",
-  xlab = "Actual",
-  ylab = "Predicted"
-)
-abline(0, 1, col = "red")
-abline(lm(pred_rf_att_trust ~ AE_att_tot, data = rf_model_att_trust_full), col = "blue", lwd = 2)
-
-# Step 6: Print model info and variable importance
-print(rf_attendance_trust)
-importance(rf_attendance_trust)
-
-# Step 7: Variable importance plot
-var_imp_rf_att_trust <- importance(rf_attendance_trust)
-var_imp_rf_att_trust_df <- as.data.frame(var_imp_rf_att_trust)
-var_imp_rf_att_trust_df$Variable <- rownames(var_imp_rf_att_trust_df)
-
-# Match labels with friendly names
-var_imp_rf_att_trust_df$Label <- ifelse(
-  var_imp_rf_att_trust_df$Variable %in% names(friendly_names),
-  friendly_names[var_imp_rf_att_trust_df$Variable],
-  var_imp_rf_att_trust_df$Variable
-)
-
-ggplot(var_imp_rf_att_trust_df, aes(x = reorder(Label, `%IncMSE`), y = `%IncMSE`)) +
-  geom_col(fill = "steelblue") +
-  coord_flip() +
-  labs(
-    title = "Variable Importance – RF Attendance (Trust)",
-    x = "Predictor",
-    y = "% Increase in MSE"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
-    axis.title = element_text(size = 13),
-    axis.text = element_text(size = 12)
-  )
-
-
-# RF waiting times by region #
-# Linear model
-# Load necessary libraries
-library(dplyr)
-
-friendly_names <- c(
-  weighted_imd = "Deprivation Score",
-  season = "Season",
-  flu_percent = "Flu Positivity Rate",
-  covid_percent = "COVID-19 Positivity Rate",
-  bank_holiday_number = "Bank Holidays",
-  temperature = "Temperature (°C)",
-  population_density = "Population Density",
-  gp_patients_per_gp = "Patients per GP",
-  region = "NHS Region",
-  pandemic_flag = "Pandemic",
-  time_date = "Date"
-)
-
-# Aggregate by region and date
-rf_model_over4_region_full <- train_data %>%
-  mutate(across(where(is.character), ~ na_if(., "-"))) %>%
-  mutate(
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,
-    flu_percent = as.numeric(flu_percent),
-    covid_percent = as.numeric(covid_percent),
-    bank_holiday_number = as.numeric(bank_holiday_number),
-    temperature = as.numeric(temperature),
-    population_density = as.numeric(population_density),
-    gp_patients_per_gp = as.numeric(gp_patients_per_gp)
-  ) %>%
-  group_by(region, time_date, season) %>%
-  summarise(
-    AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
-    weighted_imd = mean(weighted_imd, na.rm = TRUE),
-    flu_percent = mean(flu_percent, na.rm = TRUE),
-    covid_percent = mean(covid_percent, na.rm = TRUE),
-    bank_holiday_number = mean(bank_holiday_number, na.rm = TRUE),
-    temperature = mean(temperature, na.rm = TRUE),
-    population_density = mean(population_density, na.rm = TRUE),
-    gp_patients_per_gp = mean(gp_patients_per_gp, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  filter(if_all(everything(), ~ !is.na(.))) %>%
-  mutate(season = as.factor(season))
-
-# Random Forest
-library(randomForest)
-library(dplyr)
-
-# Step 0: Replace all "-" strings with NA across character columns
+# Ensure dashes are NA
 train_data <- train_data %>%
   mutate(across(where(is.character), ~ na_if(., "-")))
 
-# Step 1: Prepare cleaned dataset for percentage model (% over 4h)
-rf_model_over4_region_full <- train_data %>%
-  select(
-    AE_per4_all, weighted_imd, season, flu_percent, covid_percent,
-    bank_holiday_number, temperature, population_density, gp_patients_per_gp
-  ) %>%
+# ================================
+# === 1. RF: Attendance by Region
+# ================================
+rf_att_region_data <- train_data %>%
   mutate(
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,  # 🔁 Target variable = % > 4h
-    flu_percent = as.numeric(flu_percent),
-    covid_percent = as.numeric(covid_percent),
-    bank_holiday_number = as.numeric(bank_holiday_number),
-    temperature = as.numeric(temperature),
-    population_density = as.numeric(population_density),
-    gp_patients_per_gp = as.numeric(gp_patients_per_gp),
-    season = as.factor(season)
+    AE_att_tot = as.numeric(AE_att_tot),
+    across(all_of(numeric_predictors), as.numeric),
+    across(all_of(categorical_predictors), as.factor)
+  ) %>%
+  group_by(region, date) %>%
+  summarise(
+    AE_att_tot = mean(AE_att_tot, na.rm = TRUE),
+    across(all_of(numeric_predictors), ~ mean(.x, na.rm = TRUE)),
+    season = first(season),
+    .groups = "drop"
   ) %>%
   filter(if_all(everything(), ~ !is.na(.)))
 
-# Step 2: Train random forest model
+rf_attendance_region <- randomForest(
+  AE_att_tot ~ ., data = rf_att_region_data, ntree = 500, importance = TRUE
+)
+
+saveRDS(rf_attendance_region, "rf_attendance_region.rds")
+
+# ================================
+# === 2. RF: Attendance by Trust
+# ================================
+rf_att_trust_data <- train_data %>%
+  mutate(
+    AE_att_tot = as.numeric(AE_att_tot),
+    across(all_of(numeric_predictors), as.numeric),
+    across(all_of(categorical_predictors), as.factor)
+  ) %>%
+  group_by(name, date) %>%
+  summarise(
+    AE_att_tot = mean(AE_att_tot, na.rm = TRUE),
+    across(all_of(numeric_predictors), ~ mean(.x, na.rm = TRUE)),
+    season = first(season),
+    .groups = "drop"
+  ) %>%
+  filter(if_all(everything(), ~ !is.na(.)))
+
+rf_attendance_trust <- randomForest(
+  AE_att_tot ~ ., data = rf_att_trust_data, ntree = 500, importance = TRUE
+)
+
+saveRDS(rf_attendance_trust, "rf_attendance_trust.rds")
+
+# ================================
+# === 3. RF: % Over 4h by Region
+# ================================
+rf_over4_region_data <- train_data %>%
+  mutate(
+    AE_per4_all = as.numeric(AE_per4_all),
+    AE_over4_pct = 1 - AE_per4_all,
+    across(all_of(numeric_predictors), as.numeric),
+    across(all_of(categorical_predictors), as.factor)
+  ) %>%
+  group_by(region, date) %>%
+  summarise(
+    AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
+    across(all_of(numeric_predictors), ~ mean(.x, na.rm = TRUE)),
+    season = first(season),
+    .groups = "drop"
+  ) %>%
+  filter(if_all(everything(), ~ !is.na(.)))
+
 rf_over4_region <- randomForest(
-  AE_over4_pct ~ weighted_imd + season + flu_percent + covid_percent +
-    bank_holiday_number + temperature + population_density + gp_patients_per_gp,
-  data = rf_model_over4_region_full,
-  ntree = 500,
-  importance = TRUE
+  AE_over4_pct ~ ., data = rf_over4_region_data, ntree = 500, importance = TRUE
 )
 
-# Step 3: Generate predictions
-rf_model_over4_region_full$pred_rf_over4_region <- predict(rf_over4_region)
+saveRDS(rf_over4_region, "rf_over4_region.rds")
 
-# Step: Calculate residuals
-rf_model_over4_region_full$residuals <- rf_model_over4_region_full$AE_over4_pct - rf_model_over4_region_full$pred_rf_over4_region
-
-# Step: Plot residual histogram (base R)
-hist(
-  rf_model_over4_region_full$residuals,
-  breaks = 30,
-  main = "Residuals – RF Over 4h % (Region)",
-  xlab = "Residuals (Actual - Predicted)",
-  col = "lightblue",
-  border = "white"
-)
-
-plot(
-  rf_model_over4_region_full$AE_over4_pct, rf_model_over4_region_full$pred_rf_over4_region,
-  main = "RF Over 4h % Predictions (Region)",
-  xlab = "Actual", ylab = "Predicted",
-  xlim = c(0, 0.6), ylim = c(0.1, 0.45)
-)
-abline(0, 1, col = "red", lwd = 2)
-abline(lm(pred_rf_over4_region ~ AE_over4_pct, data = rf_model_over4_region_full), col = "blue", lwd = 2)
-
-# Step 5: Model summary
-print(rf_over4_region)
-importance(rf_over4_region)
-
-var_imp_rf_over4_region <- importance(rf_over4_region)
-var_imp_rf_over4_region_df <- as.data.frame(var_imp_rf_over4_region)
-var_imp_rf_over4_region_df$Variable <- rownames(var_imp_rf_over4_region_df)
-
-var_imp_rf_over4_region_df$Label <- ifelse(
-  var_imp_rf_over4_region_df$Variable %in% names(friendly_names),
-  friendly_names[var_imp_rf_over4_region_df$Variable],
-  var_imp_rf_over4_region_df$Variable
-)
-
-ggplot(var_imp_rf_over4_region_df, aes(x = reorder(Label, `%IncMSE`), y = `%IncMSE`)) +
-  geom_col(fill = "steelblue") +
-  coord_flip() +
-  labs(
-    title = "Variable Importance – RF Over 4h % (Region)",
-    x = "Predictor",
-    y = "% Increase in MSE"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title.position = "plot",  # <- this line is essential
-    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
-    axis.title = element_text(size = 13),
-    axis.text = element_text(size = 12)
-  )
-
-
-# RF waiting times by trust #
-# Linear model
-# Load necessary libraries
-library(dplyr)
-
-friendly_names <- c(
-  weighted_imd = "Deprivation Score",
-  season = "Season",
-  flu_percent = "Flu Positivity Rate",
-  covid_percent = "COVID-19 Positivity Rate",
-  bank_holiday_number = "Bank Holidays",
-  temperature = "Temperature (°C)",
-  population_density = "Population Density",
-  gp_patients_per_gp = "Patients per GP",
-  region = "NHS Region",
-  pandemic_flag = "Pandemic",
-  time_date = "Date"
-)
-
-# Random Forest
-library(randomForest)
-library(dplyr)
-
-# Step 0: Replace all "-" strings with NA across character columns
-nodash_train_data <- train_data %>%
-  mutate(across(where(is.character), ~ na_if(., "-")))
-
-# Step 1: Prepare cleaned dataset for percentage model (% over 4h)
-rf_model_over4_trust_full <- nodash_train_data %>%
-  select(
-    AE_per4_all, weighted_imd, season, flu_percent, covid_percent,
-    bank_holiday_number, temperature, population_density, gp_patients_per_gp
-  ) %>%
+# ================================
+# === 4. RF: % Over 4h by Trust
+# ================================
+rf_over4_trust_data <- train_data %>%
   mutate(
     AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,  # 🔁 Target variable = % > 4h
-    flu_percent = as.numeric(flu_percent),
-    covid_percent = as.numeric(covid_percent),
-    bank_holiday_number = as.numeric(bank_holiday_number),
-    temperature = as.numeric(temperature),
-    population_density = as.numeric(population_density),
-    gp_patients_per_gp = as.numeric(gp_patients_per_gp),
-    season = as.factor(season)
+    AE_over4_pct = 1 - AE_per4_all,
+    across(all_of(numeric_predictors), as.numeric),
+    across(all_of(categorical_predictors), as.factor)
+  ) %>%
+  group_by(name, date) %>%
+  summarise(
+    AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
+    across(all_of(numeric_predictors), ~ mean(.x, na.rm = TRUE)),
+    season = first(season),
+    .groups = "drop"
   ) %>%
   filter(if_all(everything(), ~ !is.na(.)))
 
-# Step 2: Train random forest model
 rf_over4_trust <- randomForest(
-  AE_over4_pct ~ weighted_imd + season + flu_percent + covid_percent +
-    bank_holiday_number + temperature + population_density + gp_patients_per_gp,
-  data = rf_model_over4_trust_full,
-  ntree = 500,
-  importance = TRUE
+  AE_over4_pct ~ ., data = rf_over4_trust_data, ntree = 500, importance = TRUE
 )
 
-# Step 3: Generate predictions
-rf_model_over4_trust_full$pred_rf_over4_trust <- predict(rf_over4_trust, newdata = rf_model_over4_trust_full)
-
-# Step: Calculate residuals
-rf_model_over4_trust_full$residuals <- rf_model_over4_trust_full$AE_over4_pct - rf_model_over4_trust_full$pred_rf_over4_trust
-
-# Step: Plot residual histogram (base R)
-hist(
-  rf_model_over4_trust_full$residuals,
-  breaks = 30,
-  main = "Residuals – RF Over 4h % (Region)",
-  xlab = "Residuals (Actual - Predicted)",
-  col = "lightblue",
-  border = "white")
-
-# Step 4: Plot
-plot(rf_model_over4_trust_full$AE_over4_pct, rf_model_over4_trust_full$pred_rf_over4_trust,
-     main = "RF Over 4h % Predictions (Trust)",
-     xlab = "Actual", ylab = "Predicted",
-     xlim = c(0, 0.65), ylim = c(0, 0.5))
-abline(0, 1, col = "red", lwd = 2)
-
-# Step 4b: Add linear regression line (predicted ~ actual)
-abline(lm(pred_rf_over4_trust ~ AE_over4_pct, data = rf_model_over4_trust_full), col = "blue", lwd = 2)
-
-# Step 5: Model summary
-print(rf_over4_trust)
-importance(rf_over4_trust)
-
-# Extract variable importance
-var_imp_rf_over4_trust <- importance(rf_over4_trust)
-var_imp_rf_over4_trust_df <- as.data.frame(var_imp_rf_over4_trust)
-var_imp_rf_over4_trust_df$Variable <- rownames(var_imp_rf_over4_trust_df)
-
-# Rename variables using friendly_names (fallback to original name if not found)
-var_imp_rf_over4_trust_df$Label <- ifelse(
-  var_imp_rf_over4_trust_df$Variable %in% names(friendly_names),
-  friendly_names[var_imp_rf_over4_trust_df$Variable],
-  var_imp_rf_over4_trust_df$Variable
-)
-
-# Plot with ggplot2
-ggplot(var_imp_rf_over4_trust_df, aes(x = reorder(Label, `%IncMSE`), y = `%IncMSE`)) +
-  geom_col(fill = "steelblue") +
-  coord_flip() +
-  labs(
-    title = "Variable Importance – RF Over 4h % (Trust)",
-    x = "Predictor",
-    y = "% Increase in MSE"
-  ) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
-    axis.title = element_text(size = 13),
-    axis.text = element_text(size = 12)  # 👈 controls tick labels
-  )
+saveRDS(rf_over4_trust, "rf_over4_trust.rds")
 
