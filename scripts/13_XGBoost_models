@@ -1,249 +1,128 @@
-# === XGBoost: A&E Attendances by Region ===
-# Load libraries
 library(dplyr)
 library(xgboost)
 
-# Step 1: Prepare cleaned dataset
-xgb_data_att_region_full <- train_data %>%
+# Common numeric features
+xgb_features <- c(
+  "weighted_imd", "flu_percent", "covid_percent",
+  "bank_holiday_number", "temperature", "population_density", "gp_patients_per_gp"
+)
+
+# === Prep ===
+train_data <- train_data %>%
   mutate(across(where(is.character), ~ na_if(., "-"))) %>%
   mutate(
     AE_att_tot = as.numeric(AE_att_tot),
-    weighted_imd = as.numeric(weighted_imd),
-    flu_percent = as.numeric(flu_percent),
-    covid_percent = as.numeric(covid_percent),
-    bank_holiday_number = as.numeric(bank_holiday_number),
-    temperature = as.numeric(temperature),
-    population_density = as.numeric(population_density),
-    gp_patients_per_gp = as.numeric(gp_patients_per_gp),
+    AE_per4_all = as.numeric(AE_per4_all),
+    AE_over4_pct = 1 - AE_per4_all,
+    across(all_of(xgb_features), as.numeric),
     season = as.factor(season)
-  ) %>%
-  group_by(region, time_date, season) %>%
+  )
+
+# =============================
+# 1. XGBoost: Attendances by Region
+# =============================
+xgb_region_data <- train_data %>%
+  group_by(region, date, season) %>%
   summarise(
     AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
-    across(c(weighted_imd, flu_percent, covid_percent, bank_holiday_number,
-             temperature, population_density, gp_patients_per_gp), ~ mean(.x, na.rm = TRUE)),
+    across(all_of(xgb_features), ~ mean(.x, na.rm = TRUE)),
     .groups = "drop"
   ) %>%
   filter(if_all(everything(), ~ !is.na(.)))
 
-# Step 2: One-hot encode categorical variable
-season_matrix <- model.matrix(~ season - 1, data = xgb_data_att_region_full)
-xgb_features_att_region <- cbind(
-  season_matrix,
-  xgb_data_att_region_full %>%
-    select(weighted_imd, flu_percent, covid_percent,
-           bank_holiday_number, temperature, population_density, gp_patients_per_gp)
+xgb_region_matrix <- cbind(
+  model.matrix(~ season - 1, xgb_region_data),
+  as.matrix(select(xgb_region_data, all_of(xgb_features)))
 )
-xgb_matrix_att_region <- as.matrix(xgb_features_att_region)
-xgb_label_att_region <- xgb_data_att_region_full$AE_att_tot
 
-# Step 3: Train model
 xgb_model_att_region <- xgboost(
-  data = xgb_matrix_att_region,
-  label = xgb_label_att_region,
+  data = xgb_region_matrix,
+  label = xgb_region_data$AE_att_tot,
   objective = "reg:squarederror",
   nrounds = 100,
   verbose = 0
 )
 
-# Step 4: Predictions
-xgb_data_att_region_full$pred_xgb_att_region <- predict(xgb_model_att_region, xgb_matrix_att_region)
+saveRDS(xgb_model_att_region, "xgb_attendance_region.rds")
 
-# Step 5: Plot
-plot(xgb_data_att_region_full$AE_att_tot, xgb_data_att_region_full$pred_xgb_att_region,
-     main = "XGBoost: Predicted vs Actual (A&E Attendances by Region)",
-     xlab = "Actual", ylab = "Predicted",
-     col = "darkorange", pch = 19)
-abline(0, 1, col = "red", lwd = 2)
-abline(lm(pred_xgb_att_region ~ AE_att_tot, data = xgb_data_att_region_full), col = "blue", lwd = 2)
-
-# Step 6: Metrics
-mse_xgb_att_region <- mean((xgb_data_att_region_full$AE_att_tot - xgb_data_att_region_full$pred_xgb_att_region)^2)
-rmse_xgb_att_region <- sqrt(mse_xgb_att_region)
-cat("XGBoost RMSE (A&E Attendances by Region):", rmse_xgb_att_region, "\n")
-
-# === XGBoost: A&E Attendances by Trust ===
-library(dplyr)
-library(xgboost)
-
-# Step 1: Prepare cleaned dataset
-xgb_data_att_trust_full <- train_data %>%
-  mutate(across(where(is.character), ~ na_if(., "-"))) %>%
-  mutate(
-    AE_att_tot = as.numeric(AE_att_tot),
-    weighted_imd = as.numeric(weighted_imd),
-    flu_percent = as.numeric(flu_percent),
-    covid_percent = as.numeric(covid_percent),
-    bank_holiday_number = as.numeric(bank_holiday_number),
-    temperature = as.numeric(temperature),
-    population_density = as.numeric(population_density),
-    gp_patients_per_gp = as.numeric(gp_patients_per_gp),
-    season = as.factor(season)
-  ) %>%
-  group_by(name, time_date, season) %>%
+# =============================
+# 2. XGBoost: Attendances by Trust
+# =============================
+xgb_trust_data <- train_data %>%
+  group_by(name, date, season) %>%
   summarise(
     AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
-    across(c(weighted_imd, flu_percent, covid_percent, bank_holiday_number,
-             temperature, population_density, gp_patients_per_gp), ~ mean(.x, na.rm = TRUE)),
+    across(all_of(xgb_features), ~ mean(.x, na.rm = TRUE)),
     .groups = "drop"
   ) %>%
   filter(if_all(everything(), ~ !is.na(.)))
 
-# Step 2: One-hot encode categorical variable (season)
-season_matrix_trust <- model.matrix(~ season - 1, data = xgb_data_att_trust_full)
-xgb_features_att_trust <- cbind(
-  season_matrix_trust,
-  xgb_data_att_trust_full %>%
-    select(weighted_imd, flu_percent, covid_percent,
-           bank_holiday_number, temperature, population_density, gp_patients_per_gp)
+xgb_trust_matrix <- cbind(
+  model.matrix(~ season - 1, xgb_trust_data),
+  as.matrix(select(xgb_trust_data, all_of(xgb_features)))
 )
-xgb_matrix_att_trust <- as.matrix(xgb_features_att_trust)
-xgb_label_att_trust <- xgb_data_att_trust_full$AE_att_tot
 
-# Step 3: Train model
 xgb_model_att_trust <- xgboost(
-  data = xgb_matrix_att_trust,
-  label = xgb_label_att_trust,
+  data = xgb_trust_matrix,
+  label = xgb_trust_data$AE_att_tot,
   objective = "reg:squarederror",
   nrounds = 100,
   verbose = 0
 )
 
-# Step 4: Predictions
-xgb_data_att_trust_full$pred_xgb_att_trust <- predict(xgb_model_att_trust, xgb_matrix_att_trust)
+saveRDS(xgb_model_att_trust, "xgb_attendance_trust.rds")
 
-# Step 5: Plot
-plot(xgb_data_att_trust_full$AE_att_tot, xgb_data_att_trust_full$pred_xgb_att_trust,
-     main = "XGBoost: Predicted vs Actual (A&E Attendances by Trust)",
-     xlab = "Actual", ylab = "Predicted",
-     col = "darkgreen", pch = 19)
-abline(0, 1, col = "red", lwd = 2)
-abline(lm(pred_xgb_att_trust ~ AE_att_tot, data = xgb_data_att_trust_full), col = "blue", lwd = 2)
-
-# Step 6: Metrics
-mse_xgb_att_trust <- mean((xgb_data_att_trust_full$AE_att_tot - xgb_data_att_trust_full$pred_xgb_att_trust)^2)
-rmse_xgb_att_trust <- sqrt(mse_xgb_att_trust)
-cat("XGBoost RMSE (A&E Attendances by Trust):", rmse_xgb_att_trust, "\n")
-
-
-# === XGBoost: A&E Waiting Times by Region ===
-# Step 1: Prepare cleaned dataset
-xgb_data_over4_region_full <- train_data %>%
-  mutate(across(where(is.character), ~ na_if(., "-"))) %>%
-  mutate(
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,
-    weighted_imd = as.numeric(weighted_imd),
-    flu_percent = as.numeric(flu_percent),
-    covid_percent = as.numeric(covid_percent),
-    bank_holiday_number = as.numeric(bank_holiday_number),
-    temperature = as.numeric(temperature),
-    population_density = as.numeric(population_density),
-    gp_patients_per_gp = as.numeric(gp_patients_per_gp),
-    season = as.factor(season)
-  ) %>%
-  group_by(region, time_date, season) %>%
+# =============================
+# 3. XGBoost: % Over 4h by Region
+# =============================
+xgb_over4_region_data <- train_data %>%
+  group_by(region, date, season) %>%
   summarise(
     AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
-    across(c(weighted_imd, flu_percent, covid_percent, bank_holiday_number,
-             temperature, population_density, gp_patients_per_gp), ~ mean(.x, na.rm = TRUE)),
+    across(all_of(xgb_features), ~ mean(.x, na.rm = TRUE)),
     .groups = "drop"
   ) %>%
   filter(if_all(everything(), ~ !is.na(.)))
 
-# Step 2: One-hot encode categorical variable (season)
-season_matrix_over4_region <- model.matrix(~ season - 1, data = xgb_data_over4_region_full)
-xgb_features_over4_region <- cbind(
-  season_matrix_over4_region,
-  xgb_data_over4_region_full %>%
-    select(weighted_imd, flu_percent, covid_percent,
-           bank_holiday_number, temperature, population_density, gp_patients_per_gp)
+xgb_over4_region_matrix <- cbind(
+  model.matrix(~ season - 1, xgb_over4_region_data),
+  as.matrix(select(xgb_over4_region_data, all_of(xgb_features)))
 )
-xgb_matrix_over4_region <- as.matrix(xgb_features_over4_region)
-xgb_label_over4_region <- xgb_data_over4_region_full$AE_over4_pct
 
-# Step 3: Train model
 xgb_model_over4_region <- xgboost(
-  data = xgb_matrix_over4_region,
-  label = xgb_label_over4_region,
+  data = xgb_over4_region_matrix,
+  label = xgb_over4_region_data$AE_over4_pct,
   objective = "reg:squarederror",
   nrounds = 100,
   verbose = 0
 )
 
-# Step 4: Predictions
-xgb_data_over4_region_full$pred_xgb_over4_region <- predict(xgb_model_over4_region, xgb_matrix_over4_region)
+saveRDS(xgb_model_over4_region, "xgb_over4_region.rds")
 
-# Step 5: Plot
-plot(xgb_data_over4_region_full$AE_over4_pct, xgb_data_over4_region_full$pred_xgb_over4_region,
-     main = "XGBoost: Predicted vs Actual (% Over 4h by Region)",
-     xlab = "Actual", ylab = "Predicted",
-     col = "darkorange", pch = 19)
-abline(0, 1, col = "red", lwd = 2)
-abline(lm(pred_xgb_over4_region ~ AE_over4_pct, data = xgb_data_over4_region_full), col = "blue", lwd = 2)
-
-# Step 6: Metrics
-mse_xgb_over4_region <- mean((xgb_data_over4_region_full$AE_over4_pct - xgb_data_over4_region_full$pred_xgb_over4_region)^2)
-rmse_xgb_over4_region <- sqrt(mse_xgb_over4_region)
-cat("XGBoost RMSE (% Over 4h by Region):", rmse_xgb_over4_region, "\n")
-
-# === XGBoost: A&E Waiting Times by Trust ===
-# Step 1: Prepare cleaned dataset
-xgb_data_over4_trust_full <- train_data %>%
-  mutate(across(where(is.character), ~ na_if(., "-"))) %>%
-  mutate(
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,
-    weighted_imd = as.numeric(weighted_imd),
-    flu_percent = as.numeric(flu_percent),
-    covid_percent = as.numeric(covid_percent),
-    bank_holiday_number = as.numeric(bank_holiday_number),
-    temperature = as.numeric(temperature),
-    population_density = as.numeric(population_density),
-    gp_patients_per_gp = as.numeric(gp_patients_per_gp),
-    season = as.factor(season)
-  ) %>%
-  group_by(name, time_date, season) %>%
+# =============================
+# 4. XGBoost: % Over 4h by Trust
+# =============================
+xgb_over4_trust_data <- train_data %>%
+  group_by(name, date, season) %>%
   summarise(
     AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
-    across(c(weighted_imd, flu_percent, covid_percent, bank_holiday_number,
-             temperature, population_density, gp_patients_per_gp), ~ mean(.x, na.rm = TRUE)),
+    across(all_of(xgb_features), ~ mean(.x, na.rm = TRUE)),
     .groups = "drop"
   ) %>%
   filter(if_all(everything(), ~ !is.na(.)))
 
-# Step 2: One-hot encode categorical variable (season)
-season_matrix_over4_trust <- model.matrix(~ season - 1, data = xgb_data_over4_trust_full)
-xgb_features_over4_trust <- cbind(
-  season_matrix_over4_trust,
-  xgb_data_over4_trust_full %>%
-    select(weighted_imd, flu_percent, covid_percent,
-           bank_holiday_number, temperature, population_density, gp_patients_per_gp)
+xgb_over4_trust_matrix <- cbind(
+  model.matrix(~ season - 1, xgb_over4_trust_data),
+  as.matrix(select(xgb_over4_trust_data, all_of(xgb_features)))
 )
-xgb_matrix_over4_trust <- as.matrix(xgb_features_over4_trust)
-xgb_label_over4_trust <- xgb_data_over4_trust_full$AE_over4_pct
 
-# Step 3: Train model
 xgb_model_over4_trust <- xgboost(
-  data = xgb_matrix_over4_trust,
-  label = xgb_label_over4_trust,
+  data = xgb_over4_trust_matrix,
+  label = xgb_over4_trust_data$AE_over4_pct,
   objective = "reg:squarederror",
   nrounds = 100,
   verbose = 0
 )
 
-# Step 4: Predictions
-xgb_data_over4_trust_full$pred_xgb_over4_trust <- predict(xgb_model_over4_trust, xgb_matrix_over4_trust)
+saveRDS(xgb_model_over4_trust, "xgb_over4_trust.rds")
 
-# Step 5: Plot
-plot(xgb_data_over4_trust_full$AE_over4_pct, xgb_data_over4_trust_full$pred_xgb_over4_trust,
-     main = "XGBoost: Predicted vs Actual (% Over 4h by Trust)",
-     xlab = "Actual", ylab = "Predicted",
-     col = "darkgreen", pch = 19)
-abline(0, 1, col = "red", lwd = 2)
-abline(lm(pred_xgb_over4_trust ~ AE_over4_pct, data = xgb_data_over4_trust_full), col = "blue", lwd = 2)
-
-# Step 6: Metrics
-mse_xgb_over4_trust <- mean((xgb_data_over4_trust_full$AE_over4_pct - xgb_data_over4_trust_full$pred_xgb_over4_trust)^2)
-rmse_xgb_over4_trust <- sqrt(mse_xgb_over4_trust)
-cat("XGBoost RMSE (% Over 4h by Trust):", rmse_xgb_over4_trust, "\n")
