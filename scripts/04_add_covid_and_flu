@@ -12,6 +12,8 @@ library(conflicted)
 conflicts_prefer(dplyr::filter)
 
 # -------------------- FILE LOCATIONS --------------------
+setwd("~/Downloads/FYP/SOCIOECON")
+
 files <- list(
   "2019-2020" = "Weekly_Influenza_and_COVID19_report_data_w27_v2.ods",
   "2020-2021" = "Weekly_Influenza_and_COVID19_report_data_w27_v2.ods",
@@ -423,8 +425,7 @@ monthly_nhs_regions_cleaned <- monthly_data_nhs %>%
 
 # Create a new merged dataset
 IMD_seasons_covidflu_data_nhs <- IMD_seasons_data_nhs %>%
-  left_join(monthly_nhs_regions_cleaned, by = c("time_date" = "date", "region" = "region"))
+  left_join(monthly_nhs_regions_cleaned, by = c("date", "region"))
 
 IMD_seasons_covidflu_data_nhs <- IMD_seasons_covidflu_data_nhs %>%
-  select(-time_period.y)
-
+  select(-time_period.x)
