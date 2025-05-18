@@ -85,3 +85,4 @@ results <- rbind(
 # === View final results ===
 print(results)
 
+results[order(results$RMSE), ]
