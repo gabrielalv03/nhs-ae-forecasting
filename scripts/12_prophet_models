@@ -1,251 +1,96 @@
-# Prophet Attendance by region #
 library(dplyr)
 library(prophet)
+library(purrr)
 
-# Ensure time_date is a Date
+# === Common Prep ===
 train_data <- train_data %>%
   mutate(
     AE_att_tot = as.numeric(AE_att_tot),
-    time_date = as.Date(time_date)
-  )
-
-# List of unique NHS regions
-regions <- unique(train_data$region)
-
-# Store predicted vs actual
-prophet_fitted_values_att_region <- data.frame()
-
-for (r in regions) {
-  message("Fitting Prophet model for: ", r)
-  
-  # Prepare Prophet input
-  region_df <- train_data %>%
-    filter(region == r) %>%
-    select(ds = time_date, y = AE_att_tot) %>%
-    group_by(ds) %>%
-    summarise(y = sum(y, na.rm = TRUE), .groups = "drop") %>%
-    filter(!is.na(y), !is.na(ds))
-  
-  # Fit Prophet model
-  model <- prophet(region_df, verbose = FALSE)
-  
-  # Predict on training data
-  fitted <- predict(model, region_df)
-  
-  # Store actual vs predicted
-  fitted_df <- region_df %>%
-    mutate(yhat = fitted$yhat, region = r)
-  
-  prophet_fitted_values_att_region <- bind_rows(prophet_fitted_values_att_region, fitted_df)
-}
-
-# Find the common range for both axes
-lims <- range(c(prophet_fitted_values_att_region$y, prophet_fitted_values_att_region$yhat), na.rm = TRUE)
-
-# Plot with equal axis scales
-plot(
-  prophet_fitted_values_att_region$y,
-  prophet_fitted_values_att_region$yhat,
-  main = "Prophet Predicted vs Actual (Regional A&E Attendance)",
-  xlab = "Actual",
-  ylab = "Predicted",
-  col = "darkblue",
-  pch = 19,
-  xlim = lims,
-  ylim = lims
-)
-abline(0, 1, col = "red", lty = 2)
-
-# Prophet Attendance by trust #
-library(dplyr)
-library(prophet)
-
-# Ensure time_date is a Date and AE_att_tot is numeric
-train_data <- train_data %>%
-  mutate(
-    AE_att_tot = as.numeric(AE_att_tot),
-    time_date = as.Date(time_date)
-  )
-
-# List of unique NHS trusts
-trusts <- unique(train_data$name)
-
-# Store predicted vs actual
-prophet_fitted_values_trust <- data.frame()
-
-for (t in trusts) {
-  message("Fitting Prophet model for: ", t)
-  
-  # Prepare Prophet input
-  trust_df <- train_data %>%
-    filter(name == t) %>%
-    select(ds = time_date, y = AE_att_tot) %>%
-    group_by(ds) %>%
-    summarise(y = sum(y, na.rm = TRUE), .groups = "drop") %>%
-    filter(!is.na(y), !is.na(ds))
-  
-  # Skip if too few rows
-  if (nrow(trust_df) < 24) {
-    message("Skipping trust due to insufficient data: ", t)
-    next
-  }
-  
-  # Fit Prophet model
-  model <- prophet(trust_df, verbose = FALSE)
-  
-  # Predict on training data
-  fitted <- predict(model, trust_df)
-  
-  # Store actual vs predicted
-  fitted_df <- trust_df %>%
-    mutate(yhat = fitted$yhat, name = t)
-  
-  prophet_fitted_values_trust <- bind_rows(prophet_fitted_values_trust, fitted_df)
-}
-
-# Find common axis limits
-lims <- range(c(prophet_fitted_values_trust$y, prophet_fitted_values_trust$yhat), na.rm = TRUE)
-
-# Plot with equal axis scales
-plot(
-  prophet_fitted_values_trust$y,
-  prophet_fitted_values_trust$yhat,
-  main = "Prophet Predicted vs Actual (Trust A&E Attendance)",
-  xlab = "Actual",
-  ylab = "Predicted",
-  col = "darkblue",
-  pch = 19,
-  xlim = lims,
-  ylim = lims
-)
-abline(0, 1, col = "red", lty = 2)
-
-
-# Prophet waiting times by region #
-library(dplyr)
-library(prophet)
-
-# Ensure time_date is a Date and AE_over4_pct is numeric
-train_data <- train_data %>%
-  mutate(
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,  # % of attendances waiting over 4h
-    time_date = as.Date(time_date)
-  )
-
-# List of unique NHS regions
-regions <- unique(train_data$region)
-
-# Store predicted vs actual
-prophet_fitted_values_over4_region <- data.frame()
-
-for (r in regions) {
-  message("Fitting Prophet model for region: ", r)
-  
-  # Prepare Prophet input
-  region_df <- train_data %>%
-    filter(region == r) %>%
-    select(ds = time_date, y = AE_over4_pct) %>%
-    group_by(ds) %>%
-    summarise(y = mean(y, na.rm = TRUE), .groups = "drop") %>%
-    filter(!is.na(y), !is.na(ds))
-  
-  # Skip if too few data points
-  if (nrow(region_df) < 24) {
-    message("Skipping region due to insufficient data: ", r)
-    next
-  }
-  
-  # Fit Prophet model
-  model <- prophet(region_df, verbose = FALSE)
-  
-  # Predict on training data
-  fitted <- predict(model, region_df)
-  
-  # Store actual vs predicted
-  fitted_df <- region_df %>%
-    mutate(yhat = fitted$yhat, region = r)
-  
-  prophet_fitted_values_over4_region <- bind_rows(prophet_fitted_values_over4_region, fitted_df)
-}
-
-# Plot predicted vs actual (same axis scale)
-lims <- range(c(prophet_fitted_values_over4_region$y, prophet_fitted_values_over4_region$yhat), na.rm = TRUE)
-
-plot(
-  prophet_fitted_values_over4_region$y,
-  prophet_fitted_values_over4_region$yhat,
-  main = "Prophet Predicted vs Actual (% Over 4h by Region)",
-  xlab = "Actual",
-  ylab = "Predicted",
-  col = "darkblue",
-  pch = 19,
-  xlim = lims,
-  ylim = lims
-)
-abline(0, 1, col = "red", lty = 2)
-
-
-# Prophet waiting times by trust #
-library(dplyr)
-library(prophet)
-
-# Prepare data: ensure date and %>4h are correctly formatted
-train_data <- train_data %>%
-  mutate(
     AE_per4_all = as.numeric(AE_per4_all),
     AE_over4_pct = 1 - AE_per4_all,
-    time_date = as.Date(time_date)
+    date = as.Date(date)
   )
 
-# List of unique NHS trusts
-trusts <- unique(train_data$name)
+# ================================
+# === 1. Prophet: Attendance by Region
+# ================================
+regions <- unique(train_data$region)
 
-# Store predicted vs actual
-prophet_fitted_values_over4_trust <- data.frame()
+prophet_models_attendance_region <- list()
 
-for (t in trusts) {
-  message("Fitting Prophet model for trust: ", t)
+for (r in regions) {
+  region_df <- train_data %>%
+    filter(region == r) %>%
+    group_by(ds = date) %>%
+    summarise(y = sum(AE_att_tot, na.rm = TRUE), .groups = "drop") %>%
+    filter(!is.na(ds) & !is.na(y))
   
-  # Prepare data for Prophet
-  trust_df <- train_data %>%
-    filter(name == t) %>%
-    select(ds = time_date, y = AE_over4_pct) %>%
-    group_by(ds) %>%
-    summarise(y = mean(y, na.rm = TRUE), .groups = "drop") %>%
-    filter(!is.na(y), !is.na(ds))
+  if (nrow(region_df) < 24) next
   
-  # Skip if insufficient data
-  if (nrow(trust_df) < 24) {
-    message("Skipping trust due to insufficient data: ", t)
-    next
-  }
-  
-  # Fit Prophet model
-  model <- prophet(trust_df, verbose = FALSE)
-  
-  # Predict on training data
-  fitted <- predict(model, trust_df)
-  
-  # Store results
-  fitted_df <- trust_df %>%
-    mutate(yhat = fitted$yhat, name = t)
-  
-  prophet_fitted_values_over4_trust <- bind_rows(prophet_fitted_values_over4_trust, fitted_df)
+  m <- prophet(region_df, verbose = FALSE)
+  prophet_models_attendance_region[[r]] <- m
 }
 
-# Plot: Predicted vs Actual (Equal Axis Scale)
-lims <- range(c(prophet_fitted_values_over4_trust$y, prophet_fitted_values_over4_trust$yhat), na.rm = TRUE)
+saveRDS(prophet_models_attendance_region, "prophet_attendance_region_models.rds")
 
-plot(
-  prophet_fitted_values_over4_trust$y,
-  prophet_fitted_values_over4_trust$yhat,
-  main = "Prophet Predicted vs Actual (% Over 4h by Trust)",
-  xlab = "Actual",
-  ylab = "Predicted",
-  col = "darkblue",
-  pch = 19,
-  xlim = lims,
-  ylim = lims
-)
-abline(0, 1, col = "red", lty = 2)
+# ================================
+# === 2. Prophet: Attendance by Trust
+# ================================
+trusts <- unique(train_data$name)
+
+prophet_models_attendance_trust <- list()
+
+for (t in trusts) {
+  trust_df <- train_data %>%
+    filter(name == t) %>%
+    group_by(ds = date) %>%
+    summarise(y = sum(AE_att_tot, na.rm = TRUE), .groups = "drop") %>%
+    filter(!is.na(ds) & !is.na(y))
+  
+  if (nrow(trust_df) < 24) next
+  
+  m <- prophet(trust_df, verbose = FALSE)
+  prophet_models_attendance_trust[[t]] <- m
+}
+
+saveRDS(prophet_models_attendance_trust, "prophet_attendance_trust_models.rds")
+
+# ================================
+# === 3. Prophet: % Over 4h by Region
+# ================================
+prophet_models_over4_region <- list()
+
+for (r in regions) {
+  region_df <- train_data %>%
+    filter(region == r) %>%
+    group_by(ds = date) %>%
+    summarise(y = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop") %>%
+    filter(!is.na(ds) & !is.na(y))
+  
+  if (nrow(region_df) < 24) next
+  
+  m <- prophet(region_df, verbose = FALSE)
+  prophet_models_over4_region[[r]] <- m
+}
+
+saveRDS(prophet_models_over4_region, "prophet_over4_region_models.rds")
+
+# ================================
+# === 4. Prophet: % Over 4h by Trust
+# ================================
+prophet_models_over4_trust <- list()
+
+for (t in trusts) {
+  trust_df <- train_data %>%
+    filter(name == t) %>%
+    group_by(ds = date) %>%
+    summarise(y = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop") %>%
+    filter(!is.na(ds) & !is.na(y))
+  
+  if (nrow(trust_df) < 24) next
+  
+  m <- prophet(trust_df, verbose = FALSE)
+  prophet_models_over4_trust[[t]] <- m
+}
+
+saveRDS(prophet_models_over4_trust, "prophet_over4_trust_models.rds")
