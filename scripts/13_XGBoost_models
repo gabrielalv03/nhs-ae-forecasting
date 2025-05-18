@@ -1,522 +1,249 @@
-# LSTM Attendance by region #
-library(keras)
+# === XGBoost: A&E Attendances by Region ===
+# Load libraries
 library(dplyr)
-library(lubridate)
+library(xgboost)
 
-# Step 0: Prepare the dataset
-lstm_data_att_region <- train_data %>%
+# Step 1: Prepare cleaned dataset
+xgb_data_att_region_full <- train_data %>%
+  mutate(across(where(is.character), ~ na_if(., "-"))) %>%
   mutate(
     AE_att_tot = as.numeric(AE_att_tot),
-    time_date = as.Date(time_date)
+    weighted_imd = as.numeric(weighted_imd),
+    flu_percent = as.numeric(flu_percent),
+    covid_percent = as.numeric(covid_percent),
+    bank_holiday_number = as.numeric(bank_holiday_number),
+    temperature = as.numeric(temperature),
+    population_density = as.numeric(population_density),
+    gp_patients_per_gp = as.numeric(gp_patients_per_gp),
+    season = as.factor(season)
   ) %>%
-  group_by(region, time_date) %>%
-  summarise(y = sum(AE_att_tot), .groups = "drop") %>%
-  filter(!is.na(y))
-
-# Step 1: Create a temporary output directory
-output_dir <- file.path(tempdir(), "lstm_models")
-dir.create(output_dir, showWarnings = FALSE)
-
-# Step 2: Function to create sequences
-create_sequences <- function(series, seq_len = 12) {
-  n <- length(series)
-  X <- array(NA, dim = c(n - seq_len, seq_len, 1))
-  Y <- numeric(n - seq_len)
-  for (i in 1:(n - seq_len)) {
-    X[i,,1] <- series[i:(i + seq_len - 1)]
-    Y[i] <- series[i + seq_len]
-  }
-  list(X = X, Y = Y)
-}
-
-# Step 3: Loop over each region
-regions <- unique(lstm_data_att_region$region)
-for (r in regions) {
-  message("Training LSTM for: ", r)
-  
-  region_df <- lstm_data_att_region %>% filter(region == r)
-  
-  # Scale manually and store scale info
-  scale_vals <- scale(region_df$y)
-  region_df$y_scaled <- as.numeric(scale_vals)
-  scale_center <- attr(scale_vals, "scaled:center")
-  scale_scale  <- attr(scale_vals, "scaled:scale")
-  
-  # Skip if too short
-  if (nrow(region_df) < 24) {
-    message("Skipping ", r, ": insufficient data.")
-    next
-  }
-  
-  seq_data <- create_sequences(region_df$y_scaled)
-  X <- seq_data$X
-  Y <- seq_data$Y
-  
-  # Define LSTM model
-  model <- keras_model_sequential() %>%
-    layer_lstm(units = 50, input_shape = c(dim(X)[2], 1), return_sequences = FALSE) %>%
-    layer_dense(units = 1)
-  
-  model %>% compile(optimizer = "adam", loss = "mse")
-  
-  # Train model
-  model %>% fit(X, Y, epochs = 50, batch_size = 8, verbose = 0)
-  
-  # Save model to file
-  model_path <- paste0("models/lstm_att_region_", gsub(" ", "_", r), ".h5")
-  save_model_hdf5(model, model_path)
-  
-  message("Saved model for ", r, " → ", model_path)
-}
-
-# Step 0: Prepare the dataset again
-lstm_data_att_region <- train_data %>%
-  mutate(
-    AE_att_tot = as.numeric(AE_att_tot),
-    time_date = as.Date(time_date)
+  group_by(region, time_date, season) %>%
+  summarise(
+    AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
+    across(c(weighted_imd, flu_percent, covid_percent, bank_holiday_number,
+             temperature, population_density, gp_patients_per_gp), ~ mean(.x, na.rm = TRUE)),
+    .groups = "drop"
   ) %>%
-  group_by(region, time_date) %>%
-  summarise(y = sum(AE_att_tot), .groups = "drop") %>%
-  filter(!is.na(y))
+  filter(if_all(everything(), ~ !is.na(.)))
 
-# Sequence creator
-create_sequences <- function(series, seq_len = 12) {
-  n <- length(series)
-  X <- array(NA, dim = c(n - seq_len, seq_len, 1))
-  Y <- numeric(n - seq_len)
-  for (i in 1:(n - seq_len)) {
-    X[i,,1] <- series[i:(i + seq_len - 1)]
-    Y[i] <- series[i + seq_len]
-  }
-  list(X = X, Y = Y)
-}
+# Step 2: One-hot encode categorical variable
+season_matrix <- model.matrix(~ season - 1, data = xgb_data_att_region_full)
+xgb_features_att_region <- cbind(
+  season_matrix,
+  xgb_data_att_region_full %>%
+    select(weighted_imd, flu_percent, covid_percent,
+           bank_holiday_number, temperature, population_density, gp_patients_per_gp)
+)
+xgb_matrix_att_region <- as.matrix(xgb_features_att_region)
+xgb_label_att_region <- xgb_data_att_region_full$AE_att_tot
 
-# Step 1: Loop through all regions
-regions <- unique(lstm_data_att_region$region)
-results_lstm <- data.frame()
+# Step 3: Train model
+xgb_model_att_region <- xgboost(
+  data = xgb_matrix_att_region,
+  label = xgb_label_att_region,
+  objective = "reg:squarederror",
+  nrounds = 100,
+  verbose = 0
+)
 
-for (r in regions) {
-  message("Evaluating LSTM model for: ", r)
-  
-  region_df <- lstm_data_att_region %>% filter(region == r)
-  if (nrow(region_df) < 24) {
-    message("Skipping ", r, ": insufficient data.")
-    next
-  }
-  
-  # Scale
-  scale_vals <- scale(region_df$y)
-  region_df$y_scaled <- as.numeric(scale_vals)
-  scale_center <- attr(scale_vals, "scaled:center")
-  scale_scale  <- attr(scale_vals, "scaled:scale")
-  
-  # Create sequences
-  seq_data <- create_sequences(region_df$y_scaled)
-  X <- seq_data$X
-  Y <- seq_data$Y
-  
-  # Load model
-  model_path <- paste0("models/lstm_att_region_", gsub(" ", "_", r), ".h5")
-  if (!file.exists(model_path)) {
-    message("Model file missing for: ", r)
-    next
-  }
-  model <- load_model_hdf5(model_path)
-  
-  # Predict
-  pred_scaled <- model %>% predict(X)
-  pred <- pred_scaled * scale_scale + scale_center
-  actual <- Y * scale_scale + scale_center
-  
-  # Compute errors
-  rmse <- sqrt(mean((actual - pred)^2))
-  mae <- mean(abs(actual - pred))
-  
-  results_lstm <- rbind(results_lstm, data.frame(
-    Region = r,
-    RMSE = rmse,
-    MAE = mae
-  ))
-}
+# Step 4: Predictions
+xgb_data_att_region_full$pred_xgb_att_region <- predict(xgb_model_att_region, xgb_matrix_att_region)
 
-# Step 2: Print and save results
-print(results_lstm)
-write.csv(results_lstm, "lstm_att_region_evaluation.csv", row.names = FALSE)
+# Step 5: Plot
+plot(xgb_data_att_region_full$AE_att_tot, xgb_data_att_region_full$pred_xgb_att_region,
+     main = "XGBoost: Predicted vs Actual (A&E Attendances by Region)",
+     xlab = "Actual", ylab = "Predicted",
+     col = "darkorange", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+abline(lm(pred_xgb_att_region ~ AE_att_tot, data = xgb_data_att_region_full), col = "blue", lwd = 2)
 
-# LSTM Attendance by trust #
-library(keras)
+# Step 6: Metrics
+mse_xgb_att_region <- mean((xgb_data_att_region_full$AE_att_tot - xgb_data_att_region_full$pred_xgb_att_region)^2)
+rmse_xgb_att_region <- sqrt(mse_xgb_att_region)
+cat("XGBoost RMSE (A&E Attendances by Region):", rmse_xgb_att_region, "\n")
+
+# === XGBoost: A&E Attendances by Trust ===
 library(dplyr)
-library(lubridate)
+library(xgboost)
 
-# === Prepare dataset ===
-lstm_data_att_trust <- train_data %>%
+# Step 1: Prepare cleaned dataset
+xgb_data_att_trust_full <- train_data %>%
+  mutate(across(where(is.character), ~ na_if(., "-"))) %>%
   mutate(
     AE_att_tot = as.numeric(AE_att_tot),
-    time_date = as.Date(time_date)
+    weighted_imd = as.numeric(weighted_imd),
+    flu_percent = as.numeric(flu_percent),
+    covid_percent = as.numeric(covid_percent),
+    bank_holiday_number = as.numeric(bank_holiday_number),
+    temperature = as.numeric(temperature),
+    population_density = as.numeric(population_density),
+    gp_patients_per_gp = as.numeric(gp_patients_per_gp),
+    season = as.factor(season)
   ) %>%
-  group_by(name, time_date) %>%
-  summarise(y = sum(AE_att_tot), .groups = "drop") %>%
-  filter(!is.na(y))
-
-# === Sequence function ===
-create_sequences <- function(series, seq_len = 12) {
-  n <- length(series)
-  X <- array(NA, dim = c(n - seq_len, seq_len, 1))
-  Y <- numeric(n - seq_len)
-  for (i in 1:(n - seq_len)) {
-    X[i,,1] <- series[i:(i + seq_len - 1)]
-    Y[i] <- series[i + seq_len]
-  }
-  list(X = X, Y = Y)
-}
-
-# === Train model for each trust ===
-trusts <- unique(lstm_data_att_trust$name)
-for (t in trusts) {
-  message("Training LSTM for: ", t)
-  
-  trust_df <- lstm_data_att_trust %>% filter(name == t)
-  
-  if (nrow(trust_df) < 24) {
-    message("Skipping ", t, ": insufficient data.")
-    next
-  }
-  
-  scale_vals <- scale(trust_df$y)
-  trust_df$y_scaled <- as.numeric(scale_vals)
-  scale_center <- attr(scale_vals, "scaled:center")
-  scale_scale  <- attr(scale_vals, "scaled:scale")
-  
-  seq_data <- create_sequences(trust_df$y_scaled)
-  X <- seq_data$X
-  Y <- seq_data$Y
-  
-  model <- keras_model_sequential() %>%
-    layer_lstm(units = 50, input_shape = c(dim(X)[2], 1)) %>%
-    layer_dense(units = 1)
-  
-  model %>% compile(optimizer = "adam", loss = "mse")
-  model %>% fit(X, Y, epochs = 50, batch_size = 8, verbose = 0)
-  
-  model_path <- paste0("models/lstm_att_trust_", gsub(" ", "_", t), ".h5")
-  save_model_hdf5(model, model_path)
-  
-  message("Saved model for ", t, " → ", model_path)
-}
-
-lstm_data_att_trust <- train_data %>%
-  mutate(
-    AE_att_tot = as.numeric(AE_att_tot),
-    time_date = as.Date(time_date)
+  group_by(name, time_date, season) %>%
+  summarise(
+    AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
+    across(c(weighted_imd, flu_percent, covid_percent, bank_holiday_number,
+             temperature, population_density, gp_patients_per_gp), ~ mean(.x, na.rm = TRUE)),
+    .groups = "drop"
   ) %>%
-  group_by(name, time_date) %>%
-  summarise(y = sum(AE_att_tot), .groups = "drop") %>%
-  filter(!is.na(y))
+  filter(if_all(everything(), ~ !is.na(.)))
 
-create_sequences <- function(series, seq_len = 12) {
-  n <- length(series)
-  X <- array(NA, dim = c(n - seq_len, seq_len, 1))
-  Y <- numeric(n - seq_len)
-  for (i in 1:(n - seq_len)) {
-    X[i,,1] <- series[i:(i + seq_len - 1)]
-    Y[i] <- series[i + seq_len]
-  }
-  list(X = X, Y = Y)
-}
+# Step 2: One-hot encode categorical variable (season)
+season_matrix_trust <- model.matrix(~ season - 1, data = xgb_data_att_trust_full)
+xgb_features_att_trust <- cbind(
+  season_matrix_trust,
+  xgb_data_att_trust_full %>%
+    select(weighted_imd, flu_percent, covid_percent,
+           bank_holiday_number, temperature, population_density, gp_patients_per_gp)
+)
+xgb_matrix_att_trust <- as.matrix(xgb_features_att_trust)
+xgb_label_att_trust <- xgb_data_att_trust_full$AE_att_tot
 
-trusts <- unique(lstm_data_att_trust$name)
-results_lstm_trust <- data.frame()
+# Step 3: Train model
+xgb_model_att_trust <- xgboost(
+  data = xgb_matrix_att_trust,
+  label = xgb_label_att_trust,
+  objective = "reg:squarederror",
+  nrounds = 100,
+  verbose = 0
+)
 
-for (t in trusts) {
-  message("Evaluating LSTM model for: ", t)
-  
-  trust_df <- lstm_data_att_trust %>% filter(name == t)
-  if (nrow(trust_df) < 24) next
-  
-  scale_vals <- scale(trust_df$y)
-  trust_df$y_scaled <- as.numeric(scale_vals)
-  scale_center <- attr(scale_vals, "scaled:center")
-  scale_scale  <- attr(scale_vals, "scaled:scale")
-  
-  seq_data <- create_sequences(trust_df$y_scaled)
-  X <- seq_data$X
-  Y <- seq_data$Y
-  
-  model_path <- paste0("models/lstm_att_trust_", gsub(" ", "_", t), ".h5")
-  if (!file.exists(model_path)) {
-    message("Model file missing for: ", t)
-    next
-  }
-  
-  model <- load_model_hdf5(model_path)
-  pred_scaled <- model %>% predict(X)
-  pred <- pred_scaled * scale_scale + scale_center
-  actual <- Y * scale_scale + scale_center
-  
-  rmse <- sqrt(mean((actual - pred)^2))
-  mae <- mean(abs(actual - pred))
-  
-  results_lstm_trust <- rbind(results_lstm_trust, data.frame(
-    Trust = t,
-    RMSE = rmse,
-    MAE = mae
-  ))
-}
+# Step 4: Predictions
+xgb_data_att_trust_full$pred_xgb_att_trust <- predict(xgb_model_att_trust, xgb_matrix_att_trust)
 
-# Save and print results
-write.csv(results_lstm_trust, "/mnt/data/lstm_att_trust_evaluation_20250517_232917.csv", row.names = FALSE)
-print(results_lstm_trust)
+# Step 5: Plot
+plot(xgb_data_att_trust_full$AE_att_tot, xgb_data_att_trust_full$pred_xgb_att_trust,
+     main = "XGBoost: Predicted vs Actual (A&E Attendances by Trust)",
+     xlab = "Actual", ylab = "Predicted",
+     col = "darkgreen", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+abline(lm(pred_xgb_att_trust ~ AE_att_tot, data = xgb_data_att_trust_full), col = "blue", lwd = 2)
 
-# LSTM waiting times by region #
-library(keras)
-library(dplyr)
-library(lubridate)
+# Step 6: Metrics
+mse_xgb_att_trust <- mean((xgb_data_att_trust_full$AE_att_tot - xgb_data_att_trust_full$pred_xgb_att_trust)^2)
+rmse_xgb_att_trust <- sqrt(mse_xgb_att_trust)
+cat("XGBoost RMSE (A&E Attendances by Trust):", rmse_xgb_att_trust, "\n")
 
-# Prepare % over 4h data by region
-lstm_data_over4_region <- train_data %>%
+
+# === XGBoost: A&E Waiting Times by Region ===
+# Step 1: Prepare cleaned dataset
+xgb_data_over4_region_full <- train_data %>%
+  mutate(across(where(is.character), ~ na_if(., "-"))) %>%
   mutate(
     AE_per4_all = as.numeric(AE_per4_all),
     AE_over4_pct = 1 - AE_per4_all,
-    time_date = as.Date(time_date)
+    weighted_imd = as.numeric(weighted_imd),
+    flu_percent = as.numeric(flu_percent),
+    covid_percent = as.numeric(covid_percent),
+    bank_holiday_number = as.numeric(bank_holiday_number),
+    temperature = as.numeric(temperature),
+    population_density = as.numeric(population_density),
+    gp_patients_per_gp = as.numeric(gp_patients_per_gp),
+    season = as.factor(season)
   ) %>%
-  group_by(region, time_date) %>%
-  summarise(y = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop") %>%
-  filter(!is.na(y))
+  group_by(region, time_date, season) %>%
+  summarise(
+    AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
+    across(c(weighted_imd, flu_percent, covid_percent, bank_holiday_number,
+             temperature, population_density, gp_patients_per_gp), ~ mean(.x, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  filter(if_all(everything(), ~ !is.na(.)))
 
-# Create directory
-dir.create("models", showWarnings = FALSE)
+# Step 2: One-hot encode categorical variable (season)
+season_matrix_over4_region <- model.matrix(~ season - 1, data = xgb_data_over4_region_full)
+xgb_features_over4_region <- cbind(
+  season_matrix_over4_region,
+  xgb_data_over4_region_full %>%
+    select(weighted_imd, flu_percent, covid_percent,
+           bank_holiday_number, temperature, population_density, gp_patients_per_gp)
+)
+xgb_matrix_over4_region <- as.matrix(xgb_features_over4_region)
+xgb_label_over4_region <- xgb_data_over4_region_full$AE_over4_pct
 
-# Sequence creation function
-create_sequences <- function(series, seq_len = 12) {
-  n <- length(series)
-  X <- array(NA, dim = c(n - seq_len, seq_len, 1))
-  Y <- numeric(n - seq_len)
-  for (i in 1:(n - seq_len)) {
-    X[i,,1] <- series[i:(i + seq_len - 1)]
-    Y[i] <- series[i + seq_len]
-  }
-  list(X = X, Y = Y)
-}
+# Step 3: Train model
+xgb_model_over4_region <- xgboost(
+  data = xgb_matrix_over4_region,
+  label = xgb_label_over4_region,
+  objective = "reg:squarederror",
+  nrounds = 100,
+  verbose = 0
+)
 
-# Loop over each region
-regions <- unique(lstm_data_over4_region$region)
-for (r in regions) {
-  message("Training LSTM for: ", r)
-  
-  region_df <- lstm_data_over4_region %>% filter(region == r)
-  if (nrow(region_df) < 24) {
-    message("Skipping ", r, ": insufficient data.")
-    next
-  }
-  
-  scale_vals <- scale(region_df$y)
-  region_df$y_scaled <- as.numeric(scale_vals)
-  scale_center <- attr(scale_vals, "scaled:center")
-  scale_scale  <- attr(scale_vals, "scaled:scale")
-  
-  seq_data <- create_sequences(region_df$y_scaled)
-  X <- seq_data$X
-  Y <- seq_data$Y
-  
-  model <- keras_model_sequential() %>%
-    layer_lstm(units = 50, input_shape = c(dim(X)[2], 1)) %>%
-    layer_dense(units = 1)
-  
-  model %>% compile(optimizer = "adam", loss = "mse")
-  model %>% fit(X, Y, epochs = 50, batch_size = 8, verbose = 0)
-  
-  model_path <- paste0("models/lstm_over4_region_", gsub(" ", "_", r), ".h5")
-  save_model_hdf5(model, model_path)
-}
+# Step 4: Predictions
+xgb_data_over4_region_full$pred_xgb_over4_region <- predict(xgb_model_over4_region, xgb_matrix_over4_region)
 
-# Reload data
-lstm_data_over4_region <- train_data %>%
+# Step 5: Plot
+plot(xgb_data_over4_region_full$AE_over4_pct, xgb_data_over4_region_full$pred_xgb_over4_region,
+     main = "XGBoost: Predicted vs Actual (% Over 4h by Region)",
+     xlab = "Actual", ylab = "Predicted",
+     col = "darkorange", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+abline(lm(pred_xgb_over4_region ~ AE_over4_pct, data = xgb_data_over4_region_full), col = "blue", lwd = 2)
+
+# Step 6: Metrics
+mse_xgb_over4_region <- mean((xgb_data_over4_region_full$AE_over4_pct - xgb_data_over4_region_full$pred_xgb_over4_region)^2)
+rmse_xgb_over4_region <- sqrt(mse_xgb_over4_region)
+cat("XGBoost RMSE (% Over 4h by Region):", rmse_xgb_over4_region, "\n")
+
+# === XGBoost: A&E Waiting Times by Trust ===
+# Step 1: Prepare cleaned dataset
+xgb_data_over4_trust_full <- train_data %>%
+  mutate(across(where(is.character), ~ na_if(., "-"))) %>%
   mutate(
     AE_per4_all = as.numeric(AE_per4_all),
     AE_over4_pct = 1 - AE_per4_all,
-    time_date = as.Date(time_date)
+    weighted_imd = as.numeric(weighted_imd),
+    flu_percent = as.numeric(flu_percent),
+    covid_percent = as.numeric(covid_percent),
+    bank_holiday_number = as.numeric(bank_holiday_number),
+    temperature = as.numeric(temperature),
+    population_density = as.numeric(population_density),
+    gp_patients_per_gp = as.numeric(gp_patients_per_gp),
+    season = as.factor(season)
   ) %>%
-  group_by(region, time_date) %>%
-  summarise(y = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop") %>%
-  filter(!is.na(y))
-
-create_sequences <- function(series, seq_len = 12) {
-  n <- length(series)
-  X <- array(NA, dim = c(n - seq_len, seq_len, 1))
-  Y <- numeric(n - seq_len)
-  for (i in 1:(n - seq_len)) {
-    X[i,,1] <- series[i:(i + seq_len - 1)]
-    Y[i] <- series[i + seq_len]
-  }
-  list(X = X, Y = Y)
-}
-
-results_lstm_over4 <- data.frame()
-regions <- unique(lstm_data_over4_region$region)
-
-for (r in regions) {
-  message("Evaluating LSTM model for: ", r)
-  region_df <- lstm_data_over4_region %>% filter(region == r)
-  if (nrow(region_df) < 24) next
-  
-  scale_vals <- scale(region_df$y)
-  region_df$y_scaled <- as.numeric(scale_vals)
-  scale_center <- attr(scale_vals, "scaled:center")
-  scale_scale  <- attr(scale_vals, "scaled:scale")
-  
-  seq_data <- create_sequences(region_df$y_scaled)
-  X <- seq_data$X
-  Y <- seq_data$Y
-  
-  model_path <- paste0("models/lstm_over4_region_", gsub(" ", "_", r), ".h5")
-  if (!file.exists(model_path)) next
-  
-  model <- load_model_hdf5(model_path)
-  pred_scaled <- model %>% predict(X)
-  pred <- pred_scaled * scale_scale + scale_center
-  actual <- Y * scale_scale + scale_center
-  
-  rmse <- sqrt(mean((actual - pred)^2))
-  mae <- mean(abs(actual - pred))
-  
-  results_lstm_over4 <- rbind(results_lstm_over4, data.frame(
-    Region = r,
-    RMSE = rmse,
-    MAE = mae
-  ))
-}
-
-# Save results
-write.csv(results_lstm_over4, "/mnt/data/lstm_over4_region_evaluation_20250517_233529.csv", row.names = FALSE)
-print(results_lstm_over4)
-
-# LSTM waiting times by trust #
-library(keras)
-library(dplyr)
-library(lubridate)
-
-# Prepare the dataset
-lstm_data_over4_trust <- train_data %>%
-  mutate(
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,
-    time_date = as.Date(time_date)
+  group_by(name, time_date, season) %>%
+  summarise(
+    AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
+    across(c(weighted_imd, flu_percent, covid_percent, bank_holiday_number,
+             temperature, population_density, gp_patients_per_gp), ~ mean(.x, na.rm = TRUE)),
+    .groups = "drop"
   ) %>%
-  group_by(name, time_date) %>%
-  summarise(y = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop") %>%
-  filter(!is.na(y))
+  filter(if_all(everything(), ~ !is.na(.)))
 
-# Sequence creator
-create_sequences <- function(series, seq_len = 12) {
-  n <- length(series)
-  X <- array(NA, dim = c(n - seq_len, seq_len, 1))
-  Y <- numeric(n - seq_len)
-  for (i in 1:(n - seq_len)) {
-    X[i,,1] <- series[i:(i + seq_len - 1)]
-    Y[i] <- series[i + seq_len]
-  }
-  list(X = X, Y = Y)
-}
+# Step 2: One-hot encode categorical variable (season)
+season_matrix_over4_trust <- model.matrix(~ season - 1, data = xgb_data_over4_trust_full)
+xgb_features_over4_trust <- cbind(
+  season_matrix_over4_trust,
+  xgb_data_over4_trust_full %>%
+    select(weighted_imd, flu_percent, covid_percent,
+           bank_holiday_number, temperature, population_density, gp_patients_per_gp)
+)
+xgb_matrix_over4_trust <- as.matrix(xgb_features_over4_trust)
+xgb_label_over4_trust <- xgb_data_over4_trust_full$AE_over4_pct
 
-# Train models
-trusts <- unique(lstm_data_over4_trust$name)
-for (t in trusts) {
-  message("Training LSTM for: ", t)
-  
-  trust_df <- lstm_data_over4_trust %>% filter(name == t)
-  if (nrow(trust_df) < 24) {
-    message("Skipping ", t, ": insufficient data.")
-    next
-  }
-  
-  scale_vals <- scale(trust_df$y)
-  trust_df$y_scaled <- as.numeric(scale_vals)
-  scale_center <- attr(scale_vals, "scaled:center")
-  scale_scale  <- attr(scale_vals, "scaled:scale")
-  
-  seq_data <- create_sequences(trust_df$y_scaled)
-  X <- seq_data$X
-  Y <- seq_data$Y
-  
-  model <- keras_model_sequential() %>%
-    layer_lstm(units = 50, input_shape = c(dim(X)[2], 1), return_sequences = FALSE) %>%
-    layer_dense(units = 1)
-  
-  model %>% compile(optimizer = "adam", loss = "mse")
-  model %>% fit(X, Y, epochs = 50, batch_size = 8, verbose = 0)
-  
-  model_path <- paste0("models/lstm_over4_trust_", gsub(" ", "_", t), ".h5")
-  save_model_hdf5(model, model_path)
-  message("Saved model for ", t, " → ", model_path)
-}
+# Step 3: Train model
+xgb_model_over4_trust <- xgboost(
+  data = xgb_matrix_over4_trust,
+  label = xgb_label_over4_trust,
+  objective = "reg:squarederror",
+  nrounds = 100,
+  verbose = 0
+)
 
-# Prepare the dataset again
-lstm_data_over4_trust <- train_data %>%
-  mutate(
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,
-    time_date = as.Date(time_date)
-  ) %>%
-  group_by(name, time_date) %>%
-  summarise(y = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop") %>%
-  filter(!is.na(y))
+# Step 4: Predictions
+xgb_data_over4_trust_full$pred_xgb_over4_trust <- predict(xgb_model_over4_trust, xgb_matrix_over4_trust)
 
-# Sequence creator
-create_sequences <- function(series, seq_len = 12) {
-  n <- length(series)
-  X <- array(NA, dim = c(n - seq_len, seq_len, 1))
-  Y <- numeric(n - seq_len)
-  for (i in 1:(n - seq_len)) {
-    X[i,,1] <- series[i:(i + seq_len - 1)]
-    Y[i] <- series[i + seq_len]
-  }
-  list(X = X, Y = Y)
-}
+# Step 5: Plot
+plot(xgb_data_over4_trust_full$AE_over4_pct, xgb_data_over4_trust_full$pred_xgb_over4_trust,
+     main = "XGBoost: Predicted vs Actual (% Over 4h by Trust)",
+     xlab = "Actual", ylab = "Predicted",
+     col = "darkgreen", pch = 19)
+abline(0, 1, col = "red", lwd = 2)
+abline(lm(pred_xgb_over4_trust ~ AE_over4_pct, data = xgb_data_over4_trust_full), col = "blue", lwd = 2)
 
-# Loop through all trusts
-trusts <- unique(lstm_data_over4_trust$name)
-results_lstm_over4_trust <- data.frame()
-
-for (t in trusts) {
-  message("Evaluating LSTM model for: ", t)
-  
-  trust_df <- lstm_data_over4_trust %>% filter(name == t)
-  if (nrow(trust_df) < 24) {
-    message("Skipping ", t, ": insufficient data.")
-    next
-  }
-  
-  scale_vals <- scale(trust_df$y)
-  trust_df$y_scaled <- as.numeric(scale_vals)
-  scale_center <- attr(scale_vals, "scaled:center")
-  scale_scale  <- attr(scale_vals, "scaled:scale")
-  
-  seq_data <- create_sequences(trust_df$y_scaled)
-  X <- seq_data$X
-  Y <- seq_data$Y
-  
-  model_path <- paste0("models/lstm_over4_trust_", gsub(" ", "_", t), ".h5")
-  if (!file.exists(model_path)) {
-    message("Model file missing for: ", t)
-    next
-  }
-  
-  model <- load_model_hdf5(model_path)
-  pred_scaled <- model %>% predict(X)
-  
-  pred <- pred_scaled * scale_scale + scale_center
-  actual <- Y * scale_scale + scale_center
-  
-  rmse <- sqrt(mean((actual - pred)^2))
-  mae <- mean(abs(actual - pred))
-  
-  results_lstm_over4_trust <- rbind(results_lstm_over4_trust, data.frame(
-    Trust = t,
-    RMSE = rmse,
-    MAE = mae
-  ))
-}
-
-# Save results
-write.csv(results_lstm_over4_trust, "/mnt/data/lstm_over4_trust_evaluation_20250517_233936.csv", row.names = FALSE)
-print(results_lstm_over4_trust)
+# Step 6: Metrics
+mse_xgb_over4_trust <- mean((xgb_data_over4_trust_full$AE_over4_pct - xgb_data_over4_trust_full$pred_xgb_over4_trust)^2)
+rmse_xgb_over4_trust <- sqrt(mse_xgb_over4_trust)
+cat("XGBoost RMSE (% Over 4h by Trust):", rmse_xgb_over4_trust, "\n")
