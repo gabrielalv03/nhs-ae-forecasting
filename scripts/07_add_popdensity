@@ -5,7 +5,7 @@ library(lubridate)
 
 # === 1. Define file and sheet ===
 population_file <- "~/Downloads/FYP/SOCIOECON/population_data.xlsx"  # Adjust path
-sheet_name <- "Table 4"  # Replace with actual sheet name
+sheet_name <- "Table 4" 
 
 # === 2. Define region mapping ===
 region_mapping <- c(
@@ -35,7 +35,7 @@ population_clean <- population_raw %>%
   summarise(population = sum(`All Persons`, na.rm = TRUE), .groups = "drop")
 
 IMD_seasons_covidflu_weather_data_nhs <- IMD_seasons_covidflu_weather_data_nhs %>%
-  mutate(year = year(time_date))
+  mutate(year = year(date))
 
 IMD_seasons_covidflu_weather_pop_data_nhs <- IMD_seasons_covidflu_weather_data_nhs %>%
   left_join(population_clean, by = c("region", "year"))
@@ -44,9 +44,29 @@ IMD_seasons_covidflu_weather_pop_data_nhs <- IMD_seasons_covidflu_weather_data_n
 # === Done ===
 # View result
 IMD_seasons_covidflu_weather_pop_data_nhs %>%
-  select(region, time_date, year, population) %>%
+  select(region, date, year, population) %>%
   filter(!is.na(population)) %>%
   head()
+
+# === 5. Fit linear model per region and predict 2024 ===
+library(tidyr)
+library(purrr)
+
+# Fit linear models and predict 2024 population
+population_2024 <- population_clean %>%
+  nest(data = c(year, population)) %>%
+  mutate(
+    model = map(data, ~ lm(population ~ year, data = .x)),
+    prediction = map2(model, data, ~ predict(.x, newdata = tibble(year = 2024)))
+  ) %>%
+  transmute(region, year = 2024, population = map_dbl(prediction, 1))
+
+# Add to population_clean
+population_extended <- bind_rows(population_clean, population_2024)
+
+IMD_seasons_covidflu_weather_pop_data_nhs <- IMD_seasons_covidflu_weather_data_nhs %>%
+  mutate(year = year(date)) %>%
+  left_join(population_extended, by = c("region", "year"))
 
 library(readxl)
 library(dplyr)
