@@ -35,6 +35,5 @@ full_social_nhs_data <- IMD_seasons_covidflu_weather_pop_data_nhs %>%
   left_join(gp_clean, by = "region")
 
 cleaned_full_social_nhs_data <- full_social_nhs_data %>%
-  select(time_date, everything()) %>%
-  select(-month, -time_period.x, -file_name, -land_area_hectares, -land_area_km2, -year, -population)
-
+  select(date, everything()) %>%
+  select(-month, -file_name, -land_area_hectares, -land_area_km2, -year, -population)
