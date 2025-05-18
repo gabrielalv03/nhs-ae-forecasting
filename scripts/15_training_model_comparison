@@ -86,3 +86,93 @@ results <- rbind(
 print(results)
 
 results[order(results$RMSE), ]
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+# === Define label simplifier ===
+simplify_labels <- function(df) {
+  df %>%
+    mutate(Model = case_when(
+      str_detect(Model, "LM Attendance.*Trust")     ~ "LM (Trust)",
+      str_detect(Model, "LM Attendance.*Region")    ~ "LM (Region)",
+      str_detect(Model, "LM Over 4h.*Trust")        ~ "LM (Trust)",
+      str_detect(Model, "LM Over 4h.*Region")       ~ "LM (Region)",
+      str_detect(Model, "RF Attendance.*Trust")     ~ "Random Forest (Trust)",
+      str_detect(Model, "RF Attendance.*Region")    ~ "Random Forest (Region)",
+      str_detect(Model, "RF Over 4h.*Trust")        ~ "Random Forest (Trust)",
+      str_detect(Model, "RF Over 4h.*Region")       ~ "Random Forest (Region)",
+      str_detect(Model, "Prophet Attendance.*Trust")~ "Prophet (Trust)",
+      str_detect(Model, "Prophet Attendance.*Region")~ "Prophet (Region)",
+      str_detect(Model, "Prophet Over 4h.*Trust")   ~ "Prophet (Trust)",
+      str_detect(Model, "Prophet Over 4h.*Region")  ~ "Prophet (Region)",
+      str_detect(Model, "XGB Attendance.*Trust")    ~ "XGBoost (Trust)",
+      str_detect(Model, "XGB Attendance.*Region")   ~ "XGBoost (Region)",
+      str_detect(Model, "XGB Over 4h.*Trust")       ~ "XGBoost (Trust)",
+      str_detect(Model, "XGB Over 4h.*Region")      ~ "XGBoost (Region)",
+      str_detect(Model, "LSTM Attendance.*Trust")   ~ "LSTM (Trust)",
+      str_detect(Model, "LSTM Attendance.*Region")  ~ "LSTM (Region)",
+      str_detect(Model, "LSTM Over 4h.*Trust")      ~ "LSTM (Trust)",
+      str_detect(Model, "LSTM Over 4h.*Region")     ~ "LSTM (Region)",
+      TRUE ~ Model
+    ))
+}
+
+# === Custom factor order ===
+model_order <- c(
+  "LM (Region)", "LM (Trust)",
+  "Random Forest (Region)", "Random Forest (Trust)",
+  "Prophet (Region)", "Prophet (Trust)",
+  "XGBoost (Region)", "XGBoost (Trust)",
+  "LSTM (Region)", "LSTM (Trust)"
+)
+
+# === Process attendance ===
+results_attendance <- results %>%
+  filter(grepl("Attendance", Model)) %>%
+  mutate(Type = "Attendance") %>%
+  simplify_labels() %>%
+  mutate(Model = factor(Model, levels = model_order))
+
+# === Process over 4h ===
+results_over4 <- results %>%
+  filter(grepl("Over 4h", Model)) %>%
+  mutate(Type = "Over 4h") %>%
+  simplify_labels() %>%
+  mutate(Model = factor(Model, levels = model_order))
+
+# === Reshape ===
+results_att_long <- results_attendance %>%
+  pivot_longer(cols = c(RMSE, MAE), names_to = "Metric", values_to = "Value")
+
+results_over4_long <- results_over4 %>%
+  pivot_longer(cols = c(RMSE, MAE), names_to = "Metric", values_to = "Value")
+
+# === Plot 1: A&E Attendance Errors ===
+plot_att <- ggplot(results_att_long, aes(x = Model, y = Value, fill = Metric)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("darkorange", "steelblue")) +
+  labs(title = "A&E Attendance Errors by Model", x = "", y = "Error") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)  # Title to right
+  )
+
+# === Plot 2: % Over 4h Errors ===
+plot_over4 <- ggplot(results_over4_long, aes(x = Model, y = Value, fill = Metric)) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  scale_fill_manual(values = c("darkgreen", "skyblue")) +
+  labs(title = "% Over 4h Errors by Model", x = "", y = "Error") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    plot.title = element_text(hjust = 0.5)  # Title to right
+  )
+
+# Display
+print(plot_att)
+print(plot_over4)
+
