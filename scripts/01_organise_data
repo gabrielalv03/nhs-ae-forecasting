@@ -6,6 +6,7 @@ library(purrr)
 library(janitor)
 library(stringr)
 library(ggplot2)
+conflicted::conflicts_prefer(dplyr::recode)
 
 # Set broad working directory
 setwd("~/Downloads/FYP/DATA")
@@ -128,9 +129,10 @@ read_my_excel <- function(file) {
   
   # 2. Fix main headers only from column 4 onward (avoid overwriting "Code", "Region", "Name")
   last_main <- ""
-  for (i in 4:max_length) {
-    if (!is.na(main_headers[i]) && trimws(main_headers[i]) != "") {
-      last_main <- trimws(main_headers[i])
+  for (i in seq_len(max_length)) {
+    val <- trimws(main_headers[i])
+    if (!is.na(val) && val != "") {
+      last_main <- val
     } else {
       main_headers[i] <- last_main
     }
@@ -264,6 +266,24 @@ combined_data <- combined_data[, 1:file_name_index]
 combined_data <- combined_data %>%
   filter(code != "-")
 
+# Ensure time_period is sortable — try to parse it as a date if it's not already
+combined_data <- combined_data %>%
+  mutate(time_period_parsed = parse_date_time(time_period, orders = c("ym", "my", "Y-m", "bY", "Ym", "Y")))
+
+# Get the most recent region assignment for each trust code
+latest_region_lookup <- combined_data %>%
+  filter(!is.na(region), region != "") %>%
+  arrange(code, desc(time_period_parsed)) %>%
+  group_by(code) %>%
+  slice_head(n = 1) %>%
+  select(code, region_latest = region)
+
+# Join the latest region back to the original data (overwriting old values)
+combined_data <- combined_data %>%
+  select(-region) %>%
+  left_join(latest_region_lookup, by = "code") %>%
+  rename(region = region_latest)
+
 # Order by date
 ordered_data <- combined_data %>%
   mutate(date = my(time_period)) %>%  # Convert "June 2022" into a Date (e.g., 2022-06-01)
@@ -309,3 +329,8 @@ min_date <- min(ordered_data$date, na.rm = TRUE)
 
 ordered_data <- ordered_data %>%
   mutate(day_num = as.integer(difftime(date, min_date, units = "days")))
+
+ordered_data <- ordered_data %>%
+  select(-time_period_parsed) %>%                # Remove the parsed time column
+  relocate(region, .before = name)               # Move region column before name
+
