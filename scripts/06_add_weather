@@ -47,12 +47,6 @@ weather_data <- imap_dfr(weather_files, function(region_name, file_name) {
   read_weather_file(file_path, region_name)
 })
 
-IMD_seasons_covidflu_holiday_data_nhs <- IMD_seasons_covidflu_holiday_data_nhs %>%
-  mutate(
-    time_date = as.Date(time_date),
-    region = str_trim(region)
-  )
-
 weather_data <- weather_data %>%
   mutate(
     date = as.Date(date),
@@ -61,4 +55,5 @@ weather_data <- weather_data %>%
 
 # Join with your main dataset
 IMD_seasons_covidflu_weather_data_nhs <- IMD_seasons_covidflu_holiday_data_nhs %>%
-  left_join(weather_data, by = c("region", "time_date" = "date"))
+  left_join(weather_data, by = c("region", "date"))
+
