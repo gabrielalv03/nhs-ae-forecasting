@@ -49,7 +49,7 @@ trust_data_with_imd <- mapping_with_imd %>%
 head(trust_data_with_imd)
 
 # Create a new merged dataset
-final_data <- combined_data %>%
+final_data <- ordered_data %>%
   left_join(trust_data_with_imd, by = c("name" = "trust_name"))
 
 # Preview the merged data
@@ -58,10 +58,18 @@ head(final_data)
 # Check if there are any Trusts with missing IMD data
 final_data %>% filter(is.na(weighted_imd)) %>% select(name)
 
-# Create a clean dataset with no missing values in the needed columns
+# Simple option: use regional mean IMDs for trusts lacking IMD
+# Step 1: Calculate regional IMD averages (excluding NAs)
+imd_by_region <- final_data %>%
+  group_by(region) %>%
+  summarise(region_imd = mean(weighted_imd, na.rm = TRUE), .groups = "drop")
+
+# Step 2: Join regional averages and impute missing weighted_imd
 model_data <- final_data %>%
-  select(AE_att_tot, weighted_imd) %>%
-  filter(!is.na(AE_att_tot) & !is.na(weighted_imd))
+  left_join(imd_by_region, by = "region") %>%
+  mutate(weighted_imd = ifelse(is.na(weighted_imd), region_imd, weighted_imd)) %>%
+  select(-region_imd) %>%  # remove helper column
+  filter(!is.na(AE_att_tot))  # still drop if AE_att_tot is missing
 
 model_data <- model_data %>%
   mutate(
@@ -70,5 +78,5 @@ model_data <- model_data %>%
   )
 
 clean_data <- final_data %>%
-  filter(!is.na(weighted_imd) & !is.na(AE_att_tot))
-
+  filter(!is.na(weighted_imd) & !is.na(AE_att_tot)) %>%
+  relocate(time_period, .after = date)
