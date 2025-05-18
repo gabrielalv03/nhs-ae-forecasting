@@ -24,13 +24,13 @@ holidays <- holidays %>%
 holiday_counts <- holidays %>%
   count(month_key, name = "bank_holiday_number")
 
-# Ensure time_date is properly formatted
+# Ensure date is properly formatted
 IMD_seasons_covidflu_data_nhs <- IMD_seasons_covidflu_data_nhs %>%
-  mutate(time_date = as.Date(time_date))  # in case it's not already a Date
+  mutate(time_date = as.Date(date))  # in case it's not already a Date
 
 # Add month key and join
 IMD_seasons_covidflu_holiday_data_nhs <- IMD_seasons_covidflu_data_nhs %>%
-  mutate(month_key = floor_date(time_date, "month")) %>%
+  mutate(month_key = floor_date(date, "month")) %>%
   filter(month_key >= as.Date("2015-07-01") & month_key <= as.Date("2025-06-30")) %>%
   left_join(holiday_counts, by = "month_key") %>%
   mutate(bank_holiday_number = replace_na(bank_holiday_number, 0)) %>%
