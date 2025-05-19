@@ -12,8 +12,7 @@ train_data <- train_data %>%
   mutate(across(where(is.character), ~ na_if(., "-"))) %>%
   mutate(
     AE_att_tot = as.numeric(AE_att_tot),
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,
+    AE_over4_pct = as.numeric(AE_over4_pct),
     across(all_of(xgb_features), as.numeric),
     season = as.factor(season)
   )
@@ -126,3 +125,56 @@ xgb_model_over4_trust <- xgboost(
 
 saveRDS(xgb_model_over4_trust, "xgb_over4_trust.rds")
 
+
+library(dplyr)
+
+# 1a) Coerce types exactly like in training
+test_ready <- test_data %>%
+  mutate(across(where(is.character), ~ na_if(., "-"))) %>%
+  mutate(
+    across(c(AE_att_tot, AE_over4_pct, all_of(xgb_features)), as.numeric),
+    season = as.factor(season)
+  )
+
+# 1b) Region‐level matrices
+xgb_region_test <- test_ready %>%
+  group_by(region, date, season) %>%
+  summarise(
+    AE_att_tot     = sum(AE_att_tot, na.rm=TRUE),
+    AE_over4_pct   = mean(AE_over4_pct, na.rm=TRUE),
+    across(all_of(xgb_features), ~ mean(.x, na.rm=TRUE)),
+    .groups = "drop"
+  ) %>%
+  filter(if_all(everything(), ~ !is.na(.))) 
+
+# Build the design matrices exactly as you did when fitting
+region_mat_att   <- cbind(
+  model.matrix(~ season - 1, xgb_region_test),
+  as.matrix(select(xgb_region_test, all_of(xgb_features)))
+)
+region_mat_over4 <- region_mat_att  # same structure except the label changes
+
+# 1c) Trust‐level matrices
+xgb_trust_test <- test_ready %>%
+  group_by(name, date, season) %>%
+  summarise(
+    AE_att_tot     = sum(AE_att_tot, na.rm=TRUE),
+    AE_over4_pct   = mean(AE_over4_pct, na.rm=TRUE),
+    across(all_of(xgb_features), ~ mean(.x, na.rm=TRUE)),
+    .groups = "drop"
+  ) %>%
+  filter(if_all(everything(), ~ !is.na(.)))
+
+trust_mat_att   <- cbind(
+  model.matrix(~ season - 1, xgb_trust_test),
+  as.matrix(select(xgb_trust_test, all_of(xgb_features)))
+)
+trust_mat_over4 <- trust_mat_att
+
+# attendance
+pred_xgb_att_region <- predict(xgb_model_att_region, region_mat_att)
+pred_xgb_att_trust  <- predict(xgb_model_att_trust,  trust_mat_att)
+
+# %>4h
+pred_xgb_over4_region <- predict(xgb_model_over4_region, region_mat_over4)
+pred_xgb_over4_trust  <- predict(xgb_model_over4_trust,  trust_mat_over4)
