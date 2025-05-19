@@ -1,0 +1,57 @@
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+
+# Helper function --------------------------------------------------------
+plot_pred_actual <- function(df, actual_col, pred_prefix, title) {
+  df %>%
+    pivot_longer(
+      cols      = starts_with(pred_prefix),
+      names_to  = "model",
+      values_to = "predicted"
+    ) %>%
+    # clean up model names
+    mutate(model = str_remove(model, pred_prefix)) %>%
+    ggplot(aes_string(x = actual_col, y = "predicted")) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+    geom_point(alpha = 0.5) +
+    facet_wrap(~ model, scales = "free") +
+    labs(
+      title = title,
+      x = actual_col,
+      y = "Predicted"
+    ) +
+    theme_minimal()
+}
+# 1) Attendance by Region ------------------------------------------------
+plot_pred_actual(
+  df           = comparison_att_region_df,
+  actual_col   = "actual_AE_att_tot",
+  pred_prefix  = "pred_",
+  title        = "Attendance by Region: Predicted vs Actual"
+)
+
+# 2) Attendance by Trust -------------------------------------------------
+plot_pred_actual(
+  df           = comparison_att_trust_df,
+  actual_col   = "actual_AE_att_tot",
+  pred_prefix  = "pred_",
+  title        = "Attendance by Trust: Predicted vs Actual"
+)
+
+# 3) % Over 4h by Region -------------------------------------------------
+plot_pred_actual(
+  df           = comparison_over4_region_df,
+  actual_col   = "actual_AE_over4_pct",
+  pred_prefix  = "pred_",
+  title        = "% Over 4h by Region: Predicted vs Actual"
+)
+
+# 4) % Over 4h by Trust --------------------------------------------------
+plot_pred_actual(
+  df           = comparison_over4_trust_df,
+  actual_col   = "actual_AE_over4_pct",
+  pred_prefix  = "pred_",
+  title        = "% Over 4h by Trust: Predicted vs Actual"
+)
