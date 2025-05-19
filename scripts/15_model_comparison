@@ -55,3 +55,44 @@ plot_pred_actual(
   pred_prefix  = "pred_",
   title        = "% Over 4h by Trust: Predicted vs Actual"
 )
+
+
+# Define RMSE and MAE functions
+rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2, na.rm = TRUE))
+}
+
+mae <- function(actual, predicted) {
+  mean(abs(actual - predicted), na.rm = TRUE)
+}
+
+# Function to compute metrics across model columns
+calculate_metrics <- function(df, actual_col, pred_prefix) {
+  model_cols <- grep(paste0("^", pred_prefix), names(df), value = TRUE)
+  metrics <- lapply(model_cols, function(col) {
+    list(
+      Model = gsub(pred_prefix, "", col),
+      RMSE = rmse(df[[actual_col]], df[[col]]),
+      MAE  = mae(df[[actual_col]], df[[col]])
+    )
+  })
+  do.call(rbind, lapply(metrics, as.data.frame))
+}
+
+# Attendance by Region
+metrics_att_region <- calculate_metrics(comparison_att_region_df, "actual_AE_att_tot", "pred_")
+
+# Attendance by Trust
+metrics_att_trust  <- calculate_metrics(comparison_att_trust_df, "actual_AE_att_tot", "pred_")
+
+# % Over 4h by Region
+metrics_over4_region <- calculate_metrics(comparison_over4_region_df, "actual_AE_over4_pct", "pred_")
+
+# % Over 4h by Trust
+metrics_over4_trust  <- calculate_metrics(comparison_over4_trust_df, "actual_AE_over4_pct", "pred_")
+
+print(metrics_att_region)
+print(metrics_att_trust)
+print(metrics_over4_region)
+print(metrics_over4_trust)
+
