@@ -38,3 +38,10 @@ train_data <- train_data %>%
   select(
     AE_att_tot, AE_over4_pct, everything()  # Ensure AE_over4_pct is after AE_att_tot
   )
+
+# Ensure that categorical variables are factors
+train_data <- train_data %>%
+  mutate(
+    season = factor(season),
+    region = factor(region)
+  )
