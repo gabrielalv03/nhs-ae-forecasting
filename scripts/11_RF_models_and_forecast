@@ -25,7 +25,7 @@ rf_att_region_data <- train_data %>%
   ) %>%
   group_by(region, date) %>%
   summarise(
-    AE_att_tot = mean(AE_att_tot, na.rm = TRUE),
+    AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
     across(all_of(numeric_predictors), ~ mean(.x, na.rm = TRUE)),
     season = first(season),
     .groups = "drop"
@@ -73,7 +73,7 @@ rf_over4_region_data <- train_data %>%
   ) %>%
   group_by(region, date) %>%
   summarise(
-    AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
+    AE_over4_pct = weighted.mean(AE_over4_pct, AE_att_tot),
     across(all_of(numeric_predictors), ~ mean(.x, na.rm = TRUE)),
     season = first(season),
     .groups = "drop"
@@ -113,9 +113,60 @@ test_data <- test_data %>%
   )
 
 # Make predictions using the random forest model for AE_att_tot
-pred_rf_att_region <- predict(rf_attendance_region, newdata = test_data)
+
+# (a) Recompute region–date features
+rf_test_region_feats <- test_data %>%
+  group_by(region, date) %>%
+  summarise(
+    across(all_of(numeric_predictors), ~ mean(.x, na.rm = TRUE)),
+    season = first(season),
+    .groups = "drop"
+  )
+
+# (b) Get one RF forecast per region–date
+region_preds <- rf_test_region_feats %>%
+  mutate(
+    pred_rf_att_region = predict(rf_attendance_region, newdata = rf_test_region_feats)
+  )
+
+# (c) Left-join back to the raw 710-row test set
+pred_rf_att_region <- test_data %>%
+  left_join(region_preds %>% select(region, date, pred_rf_att_region),
+            by = c("region","date")) %>%
+  pull(pred_rf_att_region)
+
 pred_rf_att_trust <- predict(rf_attendance_trust, newdata = test_data)
 
 # Random forest model predictions: AE_over4_pct for region and trust
-pred_rf_over4_region <- predict(rf_over4_region, newdata = test_data)
+# 1) Prepare your region–date feature frame exactly as in training
+rf_test_over4_region_feats <- test_data %>%
+  # match the same type conversions you did for train
+  mutate(
+    AE_over4_pct = as.numeric(AE_over4_pct),
+    across(all_of(numeric_predictors), as.numeric),
+    across(all_of(categorical_predictors), as.factor)
+  ) %>%
+  group_by(region, date) %>%
+  summarise(
+    # summarise predictors exactly like in rf_over4_region_data
+    across(all_of(numeric_predictors), ~ mean(.x, na.rm = TRUE)),
+    season = first(season),
+    .groups = "drop"
+  ) %>%
+  filter(if_all(everything(), ~ !is.na(.)))
+
+# 2) Predict once per region–date
+region4_preds <- rf_test_over4_region_feats %>%
+  mutate(
+    pred_rf_over4_region = predict(rf_over4_region, newdata = rf_test_over4_region_feats)
+  ) %>%
+  select(region, date, pred_rf_over4_region)
+
+# 3) Join back to the full test_data (one row per trust–date)
+test_with_region4 <- test_data %>%
+  left_join(region4_preds, by = c("region", "date"))
+
+# 4) Extract your length-710 vector of region-level %>4h RF predictions
+pred_rf_over4_region <- test_with_region4$pred_rf_over4_region
+
 pred_rf_over4_trust <- predict(rf_over4_trust, newdata = test_data)
