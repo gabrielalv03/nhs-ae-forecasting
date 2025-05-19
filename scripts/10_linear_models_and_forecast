@@ -79,4 +79,10 @@ lm_over4_trust <- lm(
   data = lm_over4_trust_data
 )
 
+# Linear model predictions: AE_att_tot for region and trust
+pred_lm_att_region <- predict(lm_attendance_region, newdata = test_data)
+pred_lm_att_trust <- predict(lm_attendance_trust, newdata = test_data)
 
+# Linear model predictions: AE_over4_pct for region and trust
+pred_lm_over4_region <- predict(lm_over4_region, newdata = test_data)
+pred_lm_over4_trust <- predict(lm_over4_trust, newdata = test_data)
