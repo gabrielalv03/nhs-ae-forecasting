@@ -1,0 +1,20 @@
+library(lubridate)
+library(dplyr)
+
+# Ensure date is in Date format
+cleaned_full_social_nhs_data <- cleaned_full_social_nhs_data %>%
+  mutate(date = as.Date(date))
+
+# Create training dataset: exclude July–December 2024
+train_data <- cleaned_full_social_nhs_data %>%
+  filter(!(year(date) == 2024 & month(date) %in% 7:12)) %>%
+  mutate(
+    pandemic_flag = if_else(
+      date >= as.Date("2020-03-01") & date <= as.Date("2021-07-31"),
+      1L, 0L
+    )
+  )
+
+# Create test dataset: only July–December 2024
+test_data <- cleaned_full_social_nhs_data %>%
+  filter(year(date) == 2024 & month(date) %in% 7:12)
