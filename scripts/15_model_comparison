@@ -96,3 +96,65 @@ print(metrics_att_trust)
 print(metrics_over4_region)
 print(metrics_over4_trust)
 
+# ——————————————————————————————
+# Percentage Error Helper Functions
+# ——————————————————————————————
+percent_rmse <- function(actual, predicted) {
+  (sqrt(mean((actual - predicted)^2, na.rm = TRUE)) / mean(actual, na.rm = TRUE)) * 100
+}
+
+percent_mae <- function(actual, predicted) {
+  (mean(abs(actual - predicted), na.rm = TRUE) / mean(actual, na.rm = TRUE)) * 100
+}
+
+# ——————————————————————————————
+# Function to calculate % RMSE and MAE for all models in a df
+# ——————————————————————————————
+calculate_percent_errors <- function(df, actual_col, pred_prefix) {
+  model_cols <- grep(paste0("^", pred_prefix), names(df), value = TRUE)
+  metrics <- lapply(model_cols, function(col) {
+    list(
+      Model = gsub(pred_prefix, "", col),
+      `%RMSE` = percent_rmse(df[[actual_col]], df[[col]]),
+      `%MAE`  = percent_mae(df[[actual_col]], df[[col]])
+    )
+  })
+  do.call(rbind, lapply(metrics, as.data.frame))
+}
+
+percent_att_region   <- calculate_percent_errors(comparison_att_region_df,   "actual_AE_att_tot",   "pred_")
+percent_att_trust    <- calculate_percent_errors(comparison_att_trust_df,    "actual_AE_att_tot",   "pred_")
+percent_over4_region <- calculate_percent_errors(comparison_over4_region_df, "actual_AE_over4_pct", "pred_")
+percent_over4_trust  <- calculate_percent_errors(comparison_over4_trust_df,  "actual_AE_over4_pct", "pred_")
+
+print(percent_att_region)
+print(percent_att_trust)
+print(percent_over4_region)
+print(percent_over4_trust)
+
+# Add task labels and merge absolute + percentage errors
+
+combine_metrics <- function(abs_df, pct_df, task_name) {
+  abs_df <- abs_df %>% rename(RMSE = RMSE, MAE = MAE)
+  pct_df <- pct_df %>% rename(pct_RMSE = `X.RMSE`, pct_MAE = `X.MAE`)
+  
+  merged <- abs_df %>%
+    left_join(pct_df, by = "Model") %>%
+    mutate(Task = task_name)
+  
+  return(merged)
+}
+
+# Combine each task
+df1 <- combine_metrics(metrics_att_region,   percent_att_region,   "Attendance by Region")
+df2 <- combine_metrics(metrics_att_trust,    percent_att_trust,    "Attendance by Trust")
+df3 <- combine_metrics(metrics_over4_region, percent_over4_region, "% Over 4h by Region")
+df4 <- combine_metrics(metrics_over4_trust,  percent_over4_trust,  "% Over 4h by Trust")
+
+# Final full combined dataframe
+all_model_metrics <- bind_rows(df1, df2, df3, df4) %>%
+  relocate(Task, Model)
+
+# View
+print(all_model_metrics)
+
