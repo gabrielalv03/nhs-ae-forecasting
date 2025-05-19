@@ -1,4 +1,3 @@
-# === METRIC FUNCTIONS ===
 rmse <- function(actual, predicted) {
   sqrt(mean((actual - predicted)^2, na.rm = TRUE))
 }
@@ -7,172 +6,143 @@ mae <- function(actual, predicted) {
   mean(abs(actual - predicted), na.rm = TRUE)
 }
 
-# === BUILD RESULTS TABLE ===
-results <- data.frame(
-  Model = c(
-    "LM Attendance (Region)", "LM Attendance (Trust)",
-    "LM Over 4h % (Region)",  "LM Over 4h % (Trust)",
-    "RF Attendance (Region)", "RF Attendance (Trust)",
-    "RF Over 4h % (Region)",  "RF Over 4h % (Trust)",
-    "Prophet Attendance (Region)", "Prophet Attendance (Trust)",
-    "Prophet Over 4h % (Region)",  "Prophet Over 4h % (Trust)",
-    "XGB Attendance (Region)", "XGB Attendance (Trust)",
-    "XGB Over 4h % (Region)",  "XGB Over 4h % (Trust)"
-  ),
-  RMSE = c(
-    rmse(lm_model_att_region_anova$AE_att_tot,   lm_attendance_region_preds),
-    rmse(lm_model_att_trust_anova$AE_att_tot,    lm_attendance_trust_preds),
-    rmse(lm_model_over4_region_anova$AE_per4_all, lm_over4_region_preds),
-    rmse(lm_model_over4_trust_anova$AE_per4_all,  lm_over4_trust_preds),
-    rmse(rf_model_att_region_full$AE_att_tot,     rf_attendance_region_preds),
-    rmse(rf_model_att_trust_full$AE_att_tot,      rf_attendance_trust_preds),
-    rmse(rf_model_over4_region_full$AE_over4_pct, rf_over4_region_preds),
-    rmse(rf_model_over4_trust_full$AE_over4_pct,  rf_over4_trust_preds),
-    rmse(prophet_fitted_values_att_region$y,      prophet_fitted_values_att_region$yhat),
-    rmse(prophet_fitted_values_trust$y,           prophet_fitted_values_trust$yhat),
-    rmse(prophet_fitted_values_over4_region$y,    prophet_fitted_values_over4_region$yhat),
-    rmse(prophet_fitted_values_over4_trust$y,     prophet_fitted_values_over4_trust$yhat),
-    rmse(xgb_data_att_region_full$AE_att_tot,     xgb_data_att_region_full$pred_xgb_att_region),
-    rmse(xgb_data_att_trust_full$AE_att_tot,      xgb_data_att_trust_full$pred_xgb_att_trust),
-    rmse(xgb_data_over4_region_full$AE_over4_pct, xgb_data_over4_region_full$pred_xgb_over4_region),
-    rmse(xgb_data_over4_trust_full$AE_over4_pct,  xgb_data_over4_trust_full$pred_xgb_over4_trust)
-  ),
-  MAE = c(
-    mae(lm_model_att_region_anova$AE_att_tot,   lm_attendance_region_preds),
-    mae(lm_model_att_trust_anova$AE_att_tot,    lm_attendance_trust_preds),
-    mae(lm_model_over4_region_anova$AE_per4_all, lm_over4_region_preds),
-    mae(lm_model_over4_trust_anova$AE_per4_all,  lm_over4_trust_preds),
-    mae(rf_model_att_region_full$AE_att_tot,     rf_attendance_region_preds),
-    mae(rf_model_att_trust_full$AE_att_tot,      rf_attendance_trust_preds),
-    mae(rf_model_over4_region_full$AE_over4_pct, rf_over4_region_preds),
-    mae(rf_model_over4_trust_full$AE_over4_pct,  rf_over4_trust_preds),
-    mae(prophet_fitted_values_att_region$y,      prophet_fitted_values_att_region$yhat),
-    mae(prophet_fitted_values_trust$y,           prophet_fitted_values_trust$yhat),
-    mae(prophet_fitted_values_over4_region$y,    prophet_fitted_values_over4_region$yhat),
-    mae(prophet_fitted_values_over4_trust$y,     prophet_fitted_values_over4_trust$yhat),
-    mae(xgb_data_att_region_full$AE_att_tot,     xgb_data_att_region_full$pred_xgb_att_region),
-    mae(xgb_data_att_trust_full$AE_att_tot,      xgb_data_att_trust_full$pred_xgb_att_trust),
-    mae(xgb_data_over4_region_full$AE_over4_pct, xgb_data_over4_region_full$pred_xgb_over4_region),
-    mae(xgb_data_over4_trust_full$AE_over4_pct,  xgb_data_over4_trust_full$pred_xgb_over4_trust)
-  )
-)
+train_region_data_att <- train_data %>%
+  mutate(across(c(season, region, pandemic_flag), as.factor)) %>%
+  group_by(region, date) %>%
+  summarise(
+    AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
+    across(all_of(predictors_numeric), ~ mean(.x, na.rm = TRUE)),
+    season = first(season),
+    pandemic_flag = first(pandemic_flag),
+    .groups = "drop"
+  ) %>%
+  filter(if_all(everything(), ~ !is.na(.)))
 
-# === Append LSTM results to the existing results table ===
-results <- rbind(
-  results,
-  data.frame(
-    Model = c(
-      "LSTM Attendance (Region)",
-      "LSTM Attendance (Trust)",
-      "LSTM Over 4h % (Region)",
-      "LSTM Over 4h % (Trust)"
-    ),
-    RMSE = c(
-      mean(results_lstm$RMSE, na.rm = TRUE),
-      mean(results_lstm_trust$RMSE, na.rm = TRUE),
-      mean(results_lstm_over4$RMSE, na.rm = TRUE),
-      mean(results_lstm_over4_trust$RMSE, na.rm = TRUE)
-    ),
-    MAE = c(
-      mean(results_lstm$MAE, na.rm = TRUE),
-      mean(results_lstm_trust$MAE, na.rm = TRUE),
-      mean(results_lstm_over4$MAE, na.rm = TRUE),
-      mean(results_lstm_over4_trust$MAE, na.rm = TRUE)
-    )
-  )
-)
+train_region_data_over4 <- train_data %>%
+  mutate(across(c(season, region, pandemic_flag), as.factor)) %>%
+  group_by(region, date) %>%
+  summarise(
+    AE_per4_all = mean(AE_per4_all, na.rm = TRUE),
+    AE_over4_pct = 1 - AE_per4_all,
+    across(all_of(predictors_numeric), ~ mean(.x, na.rm = TRUE)),
+    season = first(season),
+    pandemic_flag = first(pandemic_flag),
+    .groups = "drop"
+  ) %>%
+  filter(if_all(everything(), ~ !is.na(.)))
 
-# === View final results ===
-print(results)
+train_trust_data_att <- train_data %>%
+  mutate(across(c(season, name, pandemic_flag), as.factor)) %>%
+  group_by(name, date) %>%
+  summarise(
+    AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
+    across(all_of(predictors_numeric), ~ mean(.x, na.rm = TRUE)),
+    season = first(season),
+    pandemic_flag = first(pandemic_flag),
+    .groups = "drop"
+  ) %>%
+  filter(if_all(everything(), ~ !is.na(.)))
 
-results[order(results$RMSE), ]
+train_trust_data_over4 <- train_data %>%
+  mutate(across(c(season, name, pandemic_flag), as.factor)) %>%
+  group_by(name, date) %>%
+  summarise(
+    AE_per4_all = mean(AE_per4_all, na.rm = TRUE),
+    AE_over4_pct = 1 - AE_per4_all,
+    across(all_of(predictors_numeric), ~ mean(.x, na.rm = TRUE)),
+    season = first(season),
+    pandemic_flag = first(pandemic_flag),
+    .groups = "drop"
+  ) %>%
+  filter(if_all(everything(), ~ !is.na(.)))
 
-library(ggplot2)
-library(dplyr)
-library(tidyr)
-library(stringr)
+lm_region_data_att <- train_region_data_att %>% mutate(date = as.numeric(date))
+lm_region_data_over4 <- train_region_data_over4 %>% mutate(date = as.numeric(date))
+lm_trust_data_att     <- train_trust_data_att     %>% mutate(date = as.numeric(date))
+lm_trust_data_over4   <- train_trust_data_over4   %>% mutate(date = as.numeric(date))
 
-# === Define label simplifier ===
-simplify_labels <- function(df) {
-  df %>%
-    mutate(Model = case_when(
-      str_detect(Model, "LM Attendance.*Trust")     ~ "LM (Trust)",
-      str_detect(Model, "LM Attendance.*Region")    ~ "LM (Region)",
-      str_detect(Model, "LM Over 4h.*Trust")        ~ "LM (Trust)",
-      str_detect(Model, "LM Over 4h.*Region")       ~ "LM (Region)",
-      str_detect(Model, "RF Attendance.*Trust")     ~ "Random Forest (Trust)",
-      str_detect(Model, "RF Attendance.*Region")    ~ "Random Forest (Region)",
-      str_detect(Model, "RF Over 4h.*Trust")        ~ "Random Forest (Trust)",
-      str_detect(Model, "RF Over 4h.*Region")       ~ "Random Forest (Region)",
-      str_detect(Model, "Prophet Attendance.*Trust")~ "Prophet (Trust)",
-      str_detect(Model, "Prophet Attendance.*Region")~ "Prophet (Region)",
-      str_detect(Model, "Prophet Over 4h.*Trust")   ~ "Prophet (Trust)",
-      str_detect(Model, "Prophet Over 4h.*Region")  ~ "Prophet (Region)",
-      str_detect(Model, "XGB Attendance.*Trust")    ~ "XGBoost (Trust)",
-      str_detect(Model, "XGB Attendance.*Region")   ~ "XGBoost (Region)",
-      str_detect(Model, "XGB Over 4h.*Trust")       ~ "XGBoost (Trust)",
-      str_detect(Model, "XGB Over 4h.*Region")      ~ "XGBoost (Region)",
-      str_detect(Model, "LSTM Attendance.*Trust")   ~ "LSTM (Trust)",
-      str_detect(Model, "LSTM Attendance.*Region")  ~ "LSTM (Region)",
-      str_detect(Model, "LSTM Over 4h.*Trust")      ~ "LSTM (Trust)",
-      str_detect(Model, "LSTM Over 4h.*Region")     ~ "LSTM (Region)",
-      TRUE ~ Model
-    ))
-}
+pred_lm_att_region <- predict(lm_attendance_region, newdata = lm_region_data_att)
+actual_att_region <- train_region_data_att$AE_att_tot
+rmse(actual_att_region, pred_lm_att_region)
+mae(actual_att_region, pred_lm_att_region)
 
-# === Custom factor order ===
-model_order <- c(
-  "LM (Region)", "LM (Trust)",
-  "Random Forest (Region)", "Random Forest (Trust)",
-  "Prophet (Region)", "Prophet (Trust)",
-  "XGBoost (Region)", "XGBoost (Trust)",
-  "LSTM (Region)", "LSTM (Trust)"
-)
+pred_lm_att_trust <- predict(lm_attendance_trust, newdata = lm_trust_data_att)
+actual_att_trust <- train_trust_data_att$AE_att_tot
+rmse(actual_att_trust, pred_lm_att_trust)
+mae(actual_att_trust, pred_lm_att_trust)
 
-# === Process attendance ===
-results_attendance <- results %>%
-  filter(grepl("Attendance", Model)) %>%
-  mutate(Type = "Attendance") %>%
-  simplify_labels() %>%
-  mutate(Model = factor(Model, levels = model_order))
+pred_lm_over4_region <- predict(lm_over4_region, newdata = lm_region_data_over4)
+actual_over4_region <- train_region_data_over4$AE_per4_all
+rmse(actual_over4_region, pred_lm_over4_region)
+mae(actual_over4_region, pred_lm_over4_region)
 
-# === Process over 4h ===
-results_over4 <- results %>%
-  filter(grepl("Over 4h", Model)) %>%
-  mutate(Type = "Over 4h") %>%
-  simplify_labels() %>%
-  mutate(Model = factor(Model, levels = model_order))
+pred_lm_over4_trust <- predict(lm_over4_trust, newdata = lm_trust_data_over4)
+actual_over4_trust <- train_trust_data_over4$AE_per4_all
+rmse(actual_over4_trust, pred_lm_over4_trust)
+mae(actual_over4_trust, pred_lm_over4_trust)
 
-# === Reshape ===
-results_att_long <- results_attendance %>%
-  pivot_longer(cols = c(RMSE, MAE), names_to = "Metric", values_to = "Value")
+rf_region_data_att <- train_region_data_att %>% mutate(date = as.numeric(date))
+rf_region_data_over4 <- train_region_data_over4 %>% mutate(date = as.numeric(date))
+rf_trust_data_att <- train_trust_data_att %>% mutate(date = as.numeric(date))
+rf_trust_data_over4 <- train_trust_data_over4 %>% mutate(date = as.numeric(date))
 
-results_over4_long <- results_over4 %>%
-  pivot_longer(cols = c(RMSE, MAE), names_to = "Metric", values_to = "Value")
-
-# === Plot 1: A&E Attendance Errors ===
-plot_att <- ggplot(results_att_long, aes(x = Model, y = Value, fill = Metric)) +
-  geom_bar(stat = "identity", position = position_dodge()) +
-  scale_fill_manual(values = c("darkorange", "steelblue")) +
-  labs(title = "A&E Attendance Errors by Model", x = "", y = "Error") +
-  theme_minimal(base_size = 14) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    plot.title = element_text(hjust = 0.5)  # Title to right
+# Align factor levels for season using training data used during RF model training
+rf_region_data_att <- rf_region_data_att %>%
+  mutate(
+    season = factor(season, levels = levels(rf_att_region_data$season)),
+    pandemic_flag = as.numeric(as.character(pandemic_flag)),  # <- FIX
+    region = as.character(region)  # optional: avoid factor issues if used in training
   )
 
-# === Plot 2: % Over 4h Errors ===
-plot_over4 <- ggplot(results_over4_long, aes(x = Model, y = Value, fill = Metric)) +
-  geom_bar(stat = "identity", position = position_dodge()) +
-  scale_fill_manual(values = c("darkgreen", "skyblue")) +
-  labs(title = "% Over 4h Errors by Model", x = "", y = "Error") +
-  theme_minimal(base_size = 14) +
-  theme(
-    axis.text.x = element_text(angle = 45, hjust = 1),
-    plot.title = element_text(hjust = 0.5)  # Title to right
+rf_trust_data_att <- rf_trust_data_att %>%
+  filter(name %in% observed_trusts) %>%
+  mutate(
+    name = factor(name, levels = levels(rf_att_trust_data$name)),
+    season = factor(season, levels = levels(rf_att_trust_data$season)),
+    pandemic_flag = as.numeric(as.character(pandemic_flag))
   )
 
-# Display
-print(plot_att)
-print(plot_over4)
+rf_region_data_over4 <- rf_region_data_over4 %>%
+  mutate(
+    season = factor(season, levels = levels(rf_over4_region_data$season)),
+    pandemic_flag = as.numeric(as.character(pandemic_flag)),  # <- FIX
+    region = as.character(region)  # optional: avoid factor issues if used in training
+  )
 
+rf_trust_data_over4 <- rf_trust_data_over4 %>%
+  filter(name %in% observed_trusts) %>%
+  mutate(
+    name = factor(name, levels = levels(rf_over4_trust_data$name)),
+    season = factor(season, levels = levels(rf_over4_trust_data$season)),
+    pandemic_flag = as.numeric(as.character(pandemic_flag))
+  )
+
+
+pred_rf_att_region <- predict(rf_attendance_region, newdata = rf_region_data_att)
+rf_trust_data_att <- rf_trust_data_att[, names(rf_att_trust_data)]
+rf_trust_data_att <- rf_trust_data_att %>%
+  mutate(
+    name = as.character(name),
+    date = as.Date(date, origin = "1970-01-01"),  # because numeric likely came from as.numeric(Date)
+    season = factor(season, levels = levels(rf_att_trust_data$season))
+  )
+
+pred_rf_att_trust <- predict(rf_attendance_trust, newdata = rf_trust_data_att)
+pred_rf_over4_region <- predict(rf_over4_region, newdata = rf_region_data_over4)
+rf_trust_data_over4 <- rf_trust_data_over4[, names(rf_over4_trust_data)]
+rf_trust_data_over4 <- rf_trust_data_over4 %>%
+  mutate(
+    name = as.character(name),
+    date = as.Date(date, origin = "1970-01-01"),  # because numeric likely came from as.numeric(Date)
+    season = factor(season, levels = levels(rf_att_trust_data$season))
+  )
+
+pred_rf_over4_trust <- predict(rf_over4_trust, newdata = rf_trust_data_over4)
+
+# Predicted vs Actual for lm_attendance_region
+rmse(actual_att_region, pred_lm_att_region)  # Calculate RMSE
+mae(actual_att_region, pred_lm_att_region)   # Calculate MAE
+
+# Evaluate Random Forest (RF)
+rmse(actual_att_region, pred_rf_att_region)
+mae(actual_att_region, pred_rf_att_region)
