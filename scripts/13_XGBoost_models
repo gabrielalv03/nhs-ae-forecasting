@@ -178,3 +178,23 @@ pred_xgb_att_trust  <- predict(xgb_model_att_trust,  trust_mat_att)
 # %>4h
 pred_xgb_over4_region <- predict(xgb_model_over4_region, region_mat_over4)
 pred_xgb_over4_trust  <- predict(xgb_model_over4_trust,  trust_mat_over4)
+
+# 1) Build a tiny lookup of region–date → region‐level forecasts
+region_xgb_preds <- xgb_region_test %>%
+  mutate(
+    pred_xgb_att_region   = pred_xgb_att_region,
+    pred_xgb_over4_region = pred_xgb_over4_region
+  ) %>%
+  select(region, date, pred_xgb_att_region, pred_xgb_over4_region)
+
+# 2) Join back onto your full 710-row test_data
+test_with_xgb_region <- test_data %>%
+  left_join(region_xgb_preds, by = c("region","date"))
+
+# 3) Pull out your length-710 vectors
+pred_xgb_att_region   <- test_with_xgb_region$pred_xgb_att_region
+pred_xgb_over4_region <- test_with_xgb_region$pred_xgb_over4_region
+
+# Verify
+length(pred_xgb_att_region)       # should be 710
+length(pred_xgb_over4_region)     # should be 710
