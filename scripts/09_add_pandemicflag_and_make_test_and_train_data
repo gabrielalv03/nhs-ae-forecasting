@@ -19,7 +19,8 @@ train_data <- cleaned_full_social_nhs_data %>%
     pandemic_flag = if_else(
       date >= as.Date("2020-03-01") & date <= as.Date("2021-07-31"),
       1L, 0L
-    )
+    ),
+    AE_over4_pct = 1 - AE_per4_all  # Create AE_over4_pct as 1 - AE_per4_all
   ) %>%
   select(-all_of(vars_to_remove))
 
@@ -28,3 +29,12 @@ test_data <- cleaned_full_social_nhs_data %>%
   filter(year(date) == 2024 & month(date) %in% 7:12) %>%
   select(-AE_att_tot, -AE_per4_all, -all_of(vars_to_remove))
 
+# Remove the 'pandemic_flag' and 'AE_per4_all' columns from train_data
+train_data <- train_data %>%
+  select(-pandemic_flag, -AE_per4_all)
+
+# Reorder columns to make sure AE_over4_pct comes after AE_att_tot
+train_data <- train_data %>%
+  select(
+    AE_att_tot, AE_over4_pct, everything()  # Ensure AE_over4_pct is after AE_att_tot
+  )
