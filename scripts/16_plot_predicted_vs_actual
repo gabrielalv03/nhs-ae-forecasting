@@ -1,0 +1,63 @@
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(patchwork)
+
+plot_pred_vs_actual <- function(df, actual_col, pred_prefix, title) {
+  # derive the suffix to remove, e.g. "AE_att_tot" or "AE_over4_pct"
+  suffix <- str_remove(actual_col, "^actual_")
+  
+  df_long <- df %>%
+    pivot_longer(
+      cols      = starts_with(pred_prefix),
+      names_to  = "Model",
+      values_to = "Predicted"
+    ) %>%
+    mutate(
+      # strip off "pred_"
+      Model = str_remove(Model, pred_prefix),
+      # strip off the "_<suffix>" part
+      Model = str_remove(Model, paste0("_", suffix)),
+      # recode to pretty names
+      Model = recode(Model,
+                     lm      = "Linear Model",
+                     rf      = "Random Forest",
+                     prophet = "Prophet",
+                     xgb     = "XGBoost"
+      )
+    )
+  
+  ggplot(df_long, aes(x = !!sym(actual_col), y = Predicted)) +
+    geom_point(alpha = 0.6) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "red") +
+    facet_wrap(~ Model, scales = "free") +
+    labs(
+      title = title,
+      x     = "Actual",
+      y     = "Actual"    # ← your requested y-axis label
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5)  # ← center the title
+    )
+}
+
+# Then combine exactly as before:
+p1 <- plot_pred_vs_actual(comparison_att_region_df,
+                          "actual_AE_att_tot", "pred_",
+                          "Attendance by Region")
+p2 <- plot_pred_vs_actual(comparison_att_trust_df,
+                          "actual_AE_att_tot", "pred_",
+                          "Attendance by Trust")
+p3 <- plot_pred_vs_actual(comparison_over4_region_df,
+                          "actual_AE_over4_pct", "pred_",
+                          "% Over 4h by Region")
+p4 <- plot_pred_vs_actual(comparison_over4_trust_df,
+                          "actual_AE_over4_pct", "pred_",
+                          "% Over 4h by Trust")
+
+print(p1)
+print(p2)
+print(p3)
+print(p4)
