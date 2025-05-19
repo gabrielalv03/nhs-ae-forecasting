@@ -197,3 +197,93 @@ print(pred_prophet_att_region)
 print(pred_prophet_att_trust)
 print(pred_prophet_over4_region)
 print(pred_prophet_over4_trust)
+
+library(dplyr)
+library(purrr)
+library(prophet)
+
+regions <- unique(prophet_test_data$region)
+
+pred_prophet_att_region <- set_names(
+  lapply(regions, function(r) {
+    # 1. get the future dates for this region
+    future_ds <- prophet_test_data %>%
+      filter(region == r) %>%
+      pull(ds) %>%
+      unique() %>%
+      sort()
+    
+    # 2. build a data.frame with **only** the ds column
+    df_future <- data.frame(ds = future_ds)
+    
+    # 3. run predict on the region‐specific model
+    forecast <- predict(prophet_models_attendance_region[[r]], df_future)
+    
+    # 4. return only the point forecasts
+    forecast$yhat
+  }),
+  nm = regions
+)
+
+# Inspect:
+str(pred_prophet_att_region)
+
+# helper to get a single yhat for a given model & date
+predict_one <- function(model, date) {
+  df <- data.frame(ds = as.Date(date))
+  predict(model, df)$yhat
+}
+
+# 1. Attendance by Region
+pred_prophet_att_region <- mapply(
+  FUN = function(r, d) {
+    m <- prophet_models_attendance_region[[r]]
+    if (is.null(m)) return(NA_real_)     # in case some region never got a model
+    predict_one(m, d)
+  },
+  r = prophet_test_data$region,
+  d = prophet_test_data$ds
+)
+
+# 2. Attendance by Trust
+pred_prophet_att_trust <- mapply(
+  FUN = function(t, d) {
+    m <- prophet_models_attendance_trust[[t]]
+    if (is.null(m)) return(NA_real_)
+    predict_one(m, d)
+  },
+  t = prophet_test_data$name,
+  d = prophet_test_data$ds
+)
+
+# 3. % Over 4h by Region
+pred_prophet_over4_region <- mapply(
+  FUN = function(r, d) {
+    m <- prophet_models_over4_region[[r]]
+    if (is.null(m)) return(NA_real_)
+    predict_one(m, d)
+  },
+  r = prophet_test_data$region,
+  d = prophet_test_data$ds
+)
+
+# 4. % Over 4h by Trust
+pred_prophet_over4_trust <- mapply(
+  FUN = function(t, d) {
+    m <- prophet_models_over4_trust[[t]]
+    if (is.null(m)) return(NA_real_)
+    predict_one(m, d)
+  },
+  t = prophet_test_data$name,
+  d = prophet_test_data$ds
+)
+
+# Now check:
+length(pred_prophet_att_region)        # should == nrow(prophet_test_data)
+length(pred_prophet_att_trust)         
+length(pred_prophet_over4_region)      
+length(pred_prophet_over4_trust)       
+
+class(pred_prophet_att_region)         # "numeric"
+class(pred_prophet_att_trust)          
+
