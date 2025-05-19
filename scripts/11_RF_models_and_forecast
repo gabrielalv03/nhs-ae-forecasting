@@ -104,3 +104,18 @@ rf_over4_trust <- randomForest(
 )
 
 saveRDS(rf_over4_trust, "rf_over4_trust.rds")
+
+# Ensure that 'test_data' has the same structure and factor levels as 'train_data'
+test_data <- test_data %>%
+  mutate(
+    season = factor(season, levels = levels(train_data$season)),  # Match levels of 'season'
+    region = factor(region, levels = levels(train_data$region))   # Match levels of 'region'
+  )
+
+# Make predictions using the random forest model for AE_att_tot
+pred_rf_att_region <- predict(rf_attendance_region, newdata = test_data)
+pred_rf_att_trust <- predict(rf_attendance_trust, newdata = test_data)
+
+# Random forest model predictions: AE_over4_pct for region and trust
+pred_rf_over4_region <- predict(rf_over4_region, newdata = test_data)
+pred_rf_over4_trust <- predict(rf_over4_trust, newdata = test_data)
