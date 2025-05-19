@@ -5,7 +5,14 @@ library(dplyr)
 cleaned_full_social_nhs_data <- cleaned_full_social_nhs_data %>%
   mutate(date = as.Date(date))
 
-# Create training dataset: exclude July–December 2024
+# Define columns to remove from both datasets
+vars_to_remove <- c(
+  "AE_att_T1", "AE_att_T2", "AE_att_T3", "AE_more4_T1", "AE_more4_T2", "AE_more4_T3",
+  "AE_more4_tot", "AE_per4_T1", "Em_adm_AE_T1", "Em_adm_AE_T2", "Em_adm_AE_T34",
+  "Em_adm_AE_tot", "Em_adm_other", "Em_adm_tot", "Em_pat_adm_more4", "Em_pat_adm_more12"
+)
+
+# Create training dataset: exclude July–December 2024, drop unwanted variables
 train_data <- cleaned_full_social_nhs_data %>%
   filter(!(year(date) == 2024 & month(date) %in% 7:12)) %>%
   mutate(
@@ -13,8 +20,11 @@ train_data <- cleaned_full_social_nhs_data %>%
       date >= as.Date("2020-03-01") & date <= as.Date("2021-07-31"),
       1L, 0L
     )
-  )
+  ) %>%
+  select(-all_of(vars_to_remove))
 
-# Create test dataset: only July–December 2024
+# Create test dataset: only July–December 2024, drop targets and unwanted variables
 test_data <- cleaned_full_social_nhs_data %>%
-  filter(year(date) == 2024 & month(date) %in% 7:12)
+  filter(year(date) == 2024 & month(date) %in% 7:12) %>%
+  select(-AE_att_tot, -AE_per4_all, -all_of(vars_to_remove))
+
