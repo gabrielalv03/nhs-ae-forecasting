@@ -6,8 +6,7 @@ library(purrr)
 train_data <- train_data %>%
   mutate(
     AE_att_tot = as.numeric(AE_att_tot),
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,
+    AE_over4_pct = as.numeric(AE_over4_pct),
     date = as.Date(date)
   )
 
