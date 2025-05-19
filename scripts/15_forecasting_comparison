@@ -1,0 +1,129 @@
+library(tibble)
+library(dplyr)
+# ——————————————————————————————————————————————————————————
+# 1) Attendance by Region
+# ——————————————————————————————————————————————————————————
+
+# 1) Region–date truth: sum the real attends across all trusts
+region_truth <- prophet_test_data %>%
+  group_by(region, ds) %>%
+  summarise(
+    actual_AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# 2) Build a small data-frame of your three region-level preds, one row per
+#    original test row (they’ll be repeated across trusts for the same region/date)
+region_preds_raw <- tibble(
+  region       = prophet_test_data$region,
+  ds           = prophet_test_data$ds,
+  pred_lm_AE_att_tot      = pred_lm_att_region,
+  pred_rf_AE_att_tot      = pred_rf_att_region,
+  pred_prophet_AE_att_tot = pred_prophet_att_region
+)
+
+# 3) Deduplicate to exactly one row per (region, ds):
+#    since your region-level predictions are identical across the trusts
+region_preds <- region_preds_raw %>%
+  distinct(region, ds, .keep_all = TRUE)
+
+# 4) Now join the two
+comparison_att_region_df <- region_truth %>%
+  left_join(region_preds, by = c("region", "ds")) %>%
+  arrange(region, ds)
+
+# ——————————————————————————————————————————————————————————
+# 2) Attendance by Trust
+# ——————————————————————————————————————————————————————————
+
+# a) True attendances summed per trust–date
+trust_truth <- prophet_test_data %>%
+  group_by(name, ds) %>%
+  summarise(
+    actual_AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# b) Raw predictions (one row per original test row, will repeat per trust–date)
+trust_preds_raw <- tibble(
+  name                   = prophet_test_data$name,
+  ds                     = prophet_test_data$ds,
+  pred_lm_AE_att_tot     = pred_lm_att_trust,
+  pred_rf_AE_att_tot     = pred_rf_att_trust,
+  pred_prophet_AE_att_tot= pred_prophet_att_trust
+)
+
+# c) Deduplicate to one row per (name, ds)
+trust_preds <- trust_preds_raw %>%
+  distinct(name, ds, .keep_all = TRUE)
+
+# d) Join to get comparison
+comparison_att_trust_df <- trust_truth %>%
+  left_join(trust_preds, by = c("name", "ds")) %>%
+  arrange(name, ds)
+
+# ——————————————————————————————————————————————————————————
+# 3) % Over 4h by Region
+# ——————————————————————————————————————————————————————————
+
+# a) True %>4h averaged per region–date
+region4_truth <- prophet_test_data %>%
+  group_by(region, ds) %>%
+  summarise(
+    actual_AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# b) Raw predictions for %>4h at region level
+region4_preds_raw <- tibble(
+  region                    = prophet_test_data$region,
+  ds                        = prophet_test_data$ds,
+  pred_lm_AE_over4_pct      = pred_lm_over4_region,
+  pred_rf_AE_over4_pct      = pred_rf_over4_region,
+  pred_prophet_AE_over4_pct = pred_prophet_over4_region
+)
+
+# c) One row per region–date
+region4_preds <- region4_preds_raw %>%
+  distinct(region, ds, .keep_all = TRUE)
+
+# d) Join for comparison
+comparison_over4_region_df <- region4_truth %>%
+  left_join(region4_preds, by = c("region", "ds")) %>%
+  arrange(region, ds)
+
+# ——————————————————————————————————————————————————————————
+# 4) % Over 4h by Trust
+# ——————————————————————————————————————————————————————————
+
+# a) True %>4h averaged per trust–date
+trust4_truth <- prophet_test_data %>%
+  group_by(name, ds) %>%
+  summarise(
+    actual_AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# b) Raw predictions for %>4h at trust level
+trust4_preds_raw <- tibble(
+  name                      = prophet_test_data$name,
+  ds                        = prophet_test_data$ds,
+  pred_lm_AE_over4_pct      = pred_lm_over4_trust,
+  pred_rf_AE_over4_pct      = pred_rf_over4_trust,
+  pred_prophet_AE_over4_pct = pred_prophet_over4_trust
+)
+
+# c) One row per trust–date
+trust4_preds <- trust4_preds_raw %>%
+  distinct(name, ds, .keep_all = TRUE)
+
+# d) Join for comparison
+comparison_over4_trust_df <- trust4_truth %>%
+  left_join(trust4_preds, by = c("name", "ds")) %>%
+  arrange(name, ds)
+
+# ——————————————————————————————————————————————————————————
+# Inspect results
+comparison_att_trust_df
+comparison_over4_region_df
+comparison_over4_trust_df
