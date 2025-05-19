@@ -1,0 +1,199 @@
+# Ensure that the 'date' column is renamed to 'ds' for Prophet
+prophet_train_data <- train_data %>%
+  rename(ds = date)  # Rename 'date' column to 'ds' if it's not already named so
+
+prophet_test_data <- test_data %>%
+  rename(ds = date)  # Rename 'date' column to 'ds' if it's not already named so
+
+summary(prophet_train_data$ds)  # Check the 'ds' column (date)
+summary(prophet_train_data$AE_over4_pct)  # Check the 'AE_over4_pct' column
+
+# Make sure there are no missing values
+prophet_train_data <- prophet_train_data %>%
+  filter(!is.na(AE_over4_pct) & !is.na(ds))
+
+plot(prophet_train_data$ds, prophet_train_data$AE_over4_pct, type = "l", main = "AE_over4_pct over Time")
+
+library(dplyr)
+library(prophet)
+library(purrr)
+
+# === Common Prep ===
+prophet_train_data <- prophet_train_data %>%
+  mutate(
+    AE_att_tot = as.numeric(AE_att_tot),
+    AE_over4_pct = as.numeric(AE_over4_pct),
+    ds = as.Date(ds)
+  )
+
+# ================================
+# === 1. Prophet: Attendance by Region
+# ================================
+regions <- unique(prophet_train_data$region)
+
+prophet_models_attendance_region <- list()
+
+for (r in regions) {
+  region_df <- prophet_train_data %>%
+    filter(region == r) %>%
+    group_by(ds) %>%
+    summarise(y = sum(AE_att_tot, na.rm = TRUE), .groups = "drop") %>%
+    filter(!is.na(ds) & !is.na(y))
+  
+  if (nrow(region_df) < 24) next
+  
+  m <- prophet(region_df, verbose = FALSE)
+  prophet_models_attendance_region[[r]] <- m
+}
+
+saveRDS(prophet_models_attendance_region, "prophet_attendance_region_models.rds")
+
+# ================================
+# === 2. Prophet: Attendance by Trust
+# ================================
+trusts <- unique(prophet_train_data$name)
+
+prophet_models_attendance_trust <- list()
+
+for (t in trusts) {
+  trust_df <- prophet_train_data %>%
+    filter(name == t) %>%
+    group_by(ds) %>%
+    summarise(y = sum(AE_att_tot, na.rm = TRUE), .groups = "drop") %>%
+    filter(!is.na(ds) & !is.na(y))
+  
+  if (nrow(trust_df) < 24) next
+  
+  m <- prophet(trust_df, verbose = FALSE)
+  prophet_models_attendance_trust[[t]] <- m
+}
+
+saveRDS(prophet_models_attendance_trust, "prophet_attendance_trust_models.rds")
+
+# ================================
+# === 3. Prophet: % Over 4h by Region
+# ================================
+prophet_models_over4_region <- list()
+
+for (r in regions) {
+  region_df <- prophet_train_data %>%
+    filter(region == r) %>%
+    group_by(ds) %>%
+    summarise(y = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop") %>%
+    filter(!is.na(ds) & !is.na(y))
+  
+  if (nrow(region_df) < 24) next
+  
+  m <- prophet(region_df, verbose = FALSE)
+  prophet_models_over4_region[[r]] <- m
+}
+
+saveRDS(prophet_models_over4_region, "prophet_over4_region_models.rds")
+
+# ================================
+# === 4. Prophet: % Over 4h by Trust
+# ================================
+prophet_models_over4_trust <- list()
+
+for (t in trusts) {
+  trust_df <- prophet_train_data %>%
+    filter(name == t) %>%
+    group_by(ds) %>%
+    summarise(y = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop") %>%
+    filter(!is.na(ds) & !is.na(y))
+  
+  if (nrow(trust_df) < 24) next
+  
+  m <- prophet(trust_df, verbose = FALSE)
+  prophet_models_over4_trust[[t]] <- m
+}
+
+saveRDS(prophet_models_over4_trust, "prophet_over4_trust_models.rds")
+
+
+# ========== Forecasting ==========
+# For AE_att_tot (attendance) predictions using Prophet
+
+# Make predictions for each region
+pred_prophet_att_region <- sapply(unique(prophet_test_data$region), function(region) {
+  model <- prophet_models_attendance_region[[region]]
+  
+  # Prepare the region data, only keeping the necessary columns: date (ds) and input features
+  region_data <- prophet_test_data %>%
+    filter(region == region) %>%
+    select(ds, weighted_imd, flu_percent, covid_percent, bank_holiday_number,
+           temperature, population_density, gp_patients_per_gp, season)  # Add all relevant predictors
+  
+  forecast <- predict(model, region_data)
+  return(forecast$yhat)
+})
+
+# For AE_att_tot (attendance) predictions by trust
+pred_prophet_att_trust <- sapply(unique(prophet_test_data$name), function(trust) {
+  
+  # Check if the model exists for the current trust
+  model <- prophet_models_attendance_trust[[trust]]
+  
+  # Skip the trust if no model is found
+  if (is.null(model)) {
+    message(paste("No model found for trust:", trust))
+    return(NA)  # Return NA if the model is not available
+  }
+  
+  # Prepare the trust data, only keeping the necessary columns: date (ds) and input features
+  trust_data <- prophet_test_data %>%
+    filter(name == trust) %>%
+    select(ds, weighted_imd, flu_percent, covid_percent, bank_holiday_number,
+           temperature, population_density, gp_patients_per_gp, season)  # Add all relevant predictors
+  
+  # Generate forecast using the Prophet model
+  forecast <- predict(model, trust_data)
+  
+  # Return the predicted values
+  return(forecast$yhat)
+})
+
+# For AE_over4_pct predictions using Prophet
+pred_prophet_over4_region <- sapply(unique(prophet_test_data$region), function(region) {
+  model <- prophet_models_over4_region[[region]]
+  
+  # Prepare the region data, only keeping the necessary columns: date (ds) and input features
+  region_data <- prophet_test_data %>%
+    filter(region == region) %>%
+    select(ds, weighted_imd, flu_percent, covid_percent, bank_holiday_number,
+           temperature, population_density, gp_patients_per_gp, season)  # Add all relevant predictors
+  
+  forecast <- predict(model, region_data)
+  return(forecast$yhat)
+})
+
+# For AE_over4_pct predictions by trust
+pred_prophet_over4_trust <- sapply(unique(prophet_test_data$name), function(trust) {
+  
+  # Check if the model exists for the current trust
+  model <- prophet_models_over4_trust[[trust]]
+  
+  # Skip the trust if no model is found
+  if (is.null(model)) {
+    message(paste("No model found for trust:", trust))
+    return(NA)  # Return NA if the model is not available
+  }
+  
+  # Prepare the trust data, only keeping the necessary columns: date (ds) and input features
+  trust_data <- prophet_test_data %>%
+    filter(name == trust) %>%
+    select(ds, weighted_imd, flu_percent, covid_percent, bank_holiday_number,
+           temperature, population_density, gp_patients_per_gp, season)  # Add all relevant predictors
+  
+  # Generate forecast using the Prophet model
+  forecast <- predict(model, trust_data)
+  
+  # Return the predicted values
+  return(forecast$yhat)
+})
+
+# Check the predictions for AE_att_tot and AE_over4_pct
+print(pred_prophet_att_region)
+print(pred_prophet_att_trust)
+print(pred_prophet_over4_region)
+print(pred_prophet_over4_trust)
