@@ -67,8 +67,7 @@ saveRDS(rf_attendance_trust, "rf_attendance_trust.rds")
 # ================================
 rf_over4_region_data <- train_data %>%
   mutate(
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,
+    AE_over4_pct = as.numeric(AE_over4_pct),
     across(all_of(numeric_predictors), as.numeric),
     across(all_of(categorical_predictors), as.factor)
   ) %>%
@@ -91,12 +90,6 @@ saveRDS(rf_over4_region, "rf_over4_region.rds")
 # === 4. RF: % Over 4h by Trust
 # ================================
 rf_over4_trust_data <- train_data %>%
-  mutate(
-    AE_per4_all = as.numeric(AE_per4_all),
-    AE_over4_pct = 1 - AE_per4_all,
-    across(all_of(numeric_predictors), as.numeric),
-    across(all_of(categorical_predictors), as.factor)
-  ) %>%
   group_by(name, date) %>%
   summarise(
     AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
@@ -111,4 +104,3 @@ rf_over4_trust <- randomForest(
 )
 
 saveRDS(rf_over4_trust, "rf_over4_trust.rds")
-
