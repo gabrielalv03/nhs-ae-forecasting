@@ -9,13 +9,12 @@ predictors_numeric <- c(
 
 # === 1. LM: Attendances by Region ===
 lm_attendance_region_data <- train_data %>%
-  mutate(across(c(season, region, pandemic_flag), as.factor)) %>%
+  mutate(across(c(season, region), as.factor)) %>%
   group_by(region, date) %>%
   summarise(
     AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
     across(all_of(predictors_numeric), ~ mean(.x, na.rm = TRUE)),
     season = first(season),
-    pandemic_flag = first(pandemic_flag),
     .groups = "drop"
   ) %>%
   mutate(date = as.numeric(date)) %>%
@@ -28,13 +27,12 @@ lm_attendance_region <- lm(
 
 # === 2. LM: Attendances by Trust ===
 lm_attendance_trust_data <- train_data %>%
-  mutate(across(c(season, name, pandemic_flag), as.factor)) %>%
+  mutate(across(c(season, name), as.factor)) %>%
   group_by(name, date) %>%
   summarise(
     AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
     across(all_of(predictors_numeric), ~ mean(.x, na.rm = TRUE)),
     season = first(season),
-    pandemic_flag = first(pandemic_flag),
     .groups = "drop"
   ) %>%
   mutate(date = as.numeric(date)) %>%
@@ -47,39 +45,38 @@ lm_attendance_trust <- lm(
 
 # === 3. LM: % Over 4h by Region ===
 lm_over4_region_data <- train_data %>%
-  mutate(across(c(season, region, pandemic_flag), as.factor)) %>%
+  mutate(across(c(season, region), as.factor)) %>%
   group_by(region, date) %>%
   summarise(
-    AE_per4_all = mean(AE_per4_all, na.rm = TRUE),
+    AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
     across(all_of(predictors_numeric), ~ mean(.x, na.rm = TRUE)),
     season = first(season),
-    pandemic_flag = first(pandemic_flag),
     .groups = "drop"
   ) %>%
   mutate(date = as.numeric(date)) %>%
   filter(if_all(everything(), ~ !is.na(.)))
 
 lm_over4_region <- lm(
-  AE_per4_all ~ .,
+  AE_over4_pct ~ .,
   data = lm_over4_region_data
 )
 
 # === 4. LM: % Over 4h by Trust ===
 lm_over4_trust_data <- train_data %>%
-  mutate(across(c(season, name, pandemic_flag), as.factor)) %>%
+  mutate(across(c(season, name), as.factor)) %>%
   group_by(name, date) %>%
   summarise(
-    AE_per4_all = mean(AE_per4_all, na.rm = TRUE),
+    AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
     across(all_of(predictors_numeric), ~ mean(.x, na.rm = TRUE)),
     season = first(season),
-    pandemic_flag = first(pandemic_flag),
     .groups = "drop"
   ) %>%
   mutate(date = as.numeric(date)) %>%
   filter(if_all(everything(), ~ !is.na(.)))
 
 lm_over4_trust <- lm(
-  AE_per4_all ~ .,
+  AE_over4_pct ~ .,
   data = lm_over4_trust_data
 )
+
 
