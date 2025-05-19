@@ -1,72 +1,26 @@
+# Load libraries
 library(dplyr)
 library(tidyr)
 library(ggplot2)
 library(stringr)
 
-# Helper function --------------------------------------------------------
+# === 1. Plotting Predicted vs Actual ===
 plot_pred_actual <- function(df, actual_col, pred_prefix, title) {
   df %>%
-    pivot_longer(
-      cols      = starts_with(pred_prefix),
-      names_to  = "model",
-      values_to = "predicted"
-    ) %>%
-    # clean up model names
+    pivot_longer(cols = starts_with(pred_prefix), names_to = "model", values_to = "predicted") %>%
     mutate(model = str_remove(model, pred_prefix)) %>%
     ggplot(aes_string(x = actual_col, y = "predicted")) +
     geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
     geom_point(alpha = 0.5) +
     facet_wrap(~ model, scales = "free") +
-    labs(
-      title = title,
-      x = actual_col,
-      y = "Predicted"
-    ) +
+    labs(title = title, x = actual_col, y = "Predicted") +
     theme_minimal()
 }
-# 1) Attendance by Region ------------------------------------------------
-plot_pred_actual(
-  df           = comparison_att_region_df,
-  actual_col   = "actual_AE_att_tot",
-  pred_prefix  = "pred_",
-  title        = "Attendance by Region: Predicted vs Actual"
-)
 
-# 2) Attendance by Trust -------------------------------------------------
-plot_pred_actual(
-  df           = comparison_att_trust_df,
-  actual_col   = "actual_AE_att_tot",
-  pred_prefix  = "pred_",
-  title        = "Attendance by Trust: Predicted vs Actual"
-)
+# === 2. Absolute Error Metrics ===
+rmse <- function(actual, predicted) sqrt(mean((actual - predicted)^2, na.rm = TRUE))
+mae  <- function(actual, predicted) mean(abs(actual - predicted), na.rm = TRUE)
 
-# 3) % Over 4h by Region -------------------------------------------------
-plot_pred_actual(
-  df           = comparison_over4_region_df,
-  actual_col   = "actual_AE_over4_pct",
-  pred_prefix  = "pred_",
-  title        = "% Over 4h by Region: Predicted vs Actual"
-)
-
-# 4) % Over 4h by Trust --------------------------------------------------
-plot_pred_actual(
-  df           = comparison_over4_trust_df,
-  actual_col   = "actual_AE_over4_pct",
-  pred_prefix  = "pred_",
-  title        = "% Over 4h by Trust: Predicted vs Actual"
-)
-
-
-# Define RMSE and MAE functions
-rmse <- function(actual, predicted) {
-  sqrt(mean((actual - predicted)^2, na.rm = TRUE))
-}
-
-mae <- function(actual, predicted) {
-  mean(abs(actual - predicted), na.rm = TRUE)
-}
-
-# Function to compute metrics across model columns
 calculate_metrics <- function(df, actual_col, pred_prefix) {
   model_cols <- grep(paste0("^", pred_prefix), names(df), value = TRUE)
   metrics <- lapply(model_cols, function(col) {
@@ -79,26 +33,7 @@ calculate_metrics <- function(df, actual_col, pred_prefix) {
   do.call(rbind, lapply(metrics, as.data.frame))
 }
 
-# Attendance by Region
-metrics_att_region <- calculate_metrics(comparison_att_region_df, "actual_AE_att_tot", "pred_")
-
-# Attendance by Trust
-metrics_att_trust  <- calculate_metrics(comparison_att_trust_df, "actual_AE_att_tot", "pred_")
-
-# % Over 4h by Region
-metrics_over4_region <- calculate_metrics(comparison_over4_region_df, "actual_AE_over4_pct", "pred_")
-
-# % Over 4h by Trust
-metrics_over4_trust  <- calculate_metrics(comparison_over4_trust_df, "actual_AE_over4_pct", "pred_")
-
-print(metrics_att_region)
-print(metrics_att_trust)
-print(metrics_over4_region)
-print(metrics_over4_trust)
-
-# ——————————————————————————————
-# Percentage Error Helper Functions
-# ——————————————————————————————
+# === 3. Percentage Error Metrics ===
 percent_rmse <- function(actual, predicted) {
   (sqrt(mean((actual - predicted)^2, na.rm = TRUE)) / mean(actual, na.rm = TRUE)) * 100
 }
@@ -107,36 +42,22 @@ percent_mae <- function(actual, predicted) {
   (mean(abs(actual - predicted), na.rm = TRUE) / mean(actual, na.rm = TRUE)) * 100
 }
 
-# ——————————————————————————————
-# Function to calculate % RMSE and MAE for all models in a df
-# ——————————————————————————————
 calculate_percent_errors <- function(df, actual_col, pred_prefix) {
   model_cols <- grep(paste0("^", pred_prefix), names(df), value = TRUE)
   metrics <- lapply(model_cols, function(col) {
     list(
       Model = gsub(pred_prefix, "", col),
-      `%RMSE` = percent_rmse(df[[actual_col]], df[[col]]),
-      `%MAE`  = percent_mae(df[[actual_col]], df[[col]])
+      pct_RMSE = percent_rmse(df[[actual_col]], df[[col]]),
+      pct_MAE  = percent_mae(df[[actual_col]], df[[col]])
     )
   })
   do.call(rbind, lapply(metrics, as.data.frame))
 }
 
-percent_att_region   <- calculate_percent_errors(comparison_att_region_df,   "actual_AE_att_tot",   "pred_")
-percent_att_trust    <- calculate_percent_errors(comparison_att_trust_df,    "actual_AE_att_tot",   "pred_")
-percent_over4_region <- calculate_percent_errors(comparison_over4_region_df, "actual_AE_over4_pct", "pred_")
-percent_over4_trust  <- calculate_percent_errors(comparison_over4_trust_df,  "actual_AE_over4_pct", "pred_")
-
-print(percent_att_region)
-print(percent_att_trust)
-print(percent_over4_region)
-print(percent_over4_trust)
-
-# Add task labels and merge absolute + percentage errors
-
+# === 4. Combine Absolute and Percent Metrics + Label Task ===
 combine_metrics <- function(abs_df, pct_df, task_name) {
   abs_df <- abs_df %>% rename(RMSE = RMSE, MAE = MAE)
-  pct_df <- pct_df %>% rename(pct_RMSE = `X.RMSE`, pct_MAE = `X.MAE`)
+  pct_df <- pct_df %>% rename(pct_RMSE = pct_RMSE, pct_MAE = pct_MAE)
   
   merged <- abs_df %>%
     left_join(pct_df, by = "Model") %>%
@@ -145,16 +66,113 @@ combine_metrics <- function(abs_df, pct_df, task_name) {
   return(merged)
 }
 
-# Combine each task
+# === 5. Run for Each Task ===
+metrics_att_region    <- calculate_metrics(comparison_att_region_df, "actual_AE_att_tot", "pred_")
+metrics_att_trust     <- calculate_metrics(comparison_att_trust_df, "actual_AE_att_tot", "pred_")
+metrics_over4_region  <- calculate_metrics(comparison_over4_region_df, "actual_AE_over4_pct", "pred_")
+metrics_over4_trust   <- calculate_metrics(comparison_over4_trust_df, "actual_AE_over4_pct", "pred_")
+
+percent_att_region    <- calculate_percent_errors(comparison_att_region_df, "actual_AE_att_tot", "pred_")
+percent_att_trust     <- calculate_percent_errors(comparison_att_trust_df, "actual_AE_att_tot", "pred_")
+percent_over4_region  <- calculate_percent_errors(comparison_over4_region_df, "actual_AE_over4_pct", "pred_")
+percent_over4_trust   <- calculate_percent_errors(comparison_over4_trust_df, "actual_AE_over4_pct", "pred_")
+
 df1 <- combine_metrics(metrics_att_region,   percent_att_region,   "Attendance by Region")
 df2 <- combine_metrics(metrics_att_trust,    percent_att_trust,    "Attendance by Trust")
 df3 <- combine_metrics(metrics_over4_region, percent_over4_region, "% Over 4h by Region")
 df4 <- combine_metrics(metrics_over4_trust,  percent_over4_trust,  "% Over 4h by Trust")
 
-# Final full combined dataframe
 all_model_metrics <- bind_rows(df1, df2, df3, df4) %>%
   relocate(Task, Model)
 
-# View
+# === 6. Add Ranking per Task (Stability Assessment) ===
+all_model_metrics <- all_model_metrics %>%
+  group_by(Task) %>%
+  mutate(
+    Rank_pct_RMSE = rank(pct_RMSE, ties.method = "min"),
+    Rank_pct_MAE  = rank(pct_MAE,  ties.method = "min"),
+    Stability_Rank = Rank_pct_RMSE + Rank_pct_MAE
+  ) %>%
+  ungroup()
+
+# === 7. View Summary ===
 print(all_model_metrics)
 
+# Optional: Export to CSV
+# write.csv(all_model_metrics, "all_model_metrics_summary.csv", row.names = FALSE)
+
+# Add R² to each model within a task
+r_squared <- function(actual, predicted) {
+  1 - sum((actual - predicted)^2, na.rm = TRUE) / sum((actual - mean(actual, na.rm = TRUE))^2, na.rm = TRUE)
+}
+
+# Function to calculate residual diagnostics
+residual_diagnostics <- function(df, actual_col, pred_prefix) {
+  model_cols <- grep(paste0("^", pred_prefix), names(df), value = TRUE)
+  results <- lapply(model_cols, function(col) {
+    pred <- df[[col]]
+    actual <- df[[actual_col]]
+    resids <- actual - pred
+    data.frame(
+      Model = gsub(pred_prefix, "", col),
+      R2 = r_squared(actual, pred),
+      Residual_Mean = mean(resids, na.rm = TRUE),
+      Residual_SD   = sd(resids, na.rm = TRUE)
+    )
+  })
+  do.call(rbind, results)
+}
+
+# Create diagnostic tables
+diag1 <- residual_diagnostics(comparison_att_region_df,   "actual_AE_att_tot",   "pred_") %>% mutate(Task = "Attendance by Region")
+diag2 <- residual_diagnostics(comparison_att_trust_df,    "actual_AE_att_tot",   "pred_") %>% mutate(Task = "Attendance by Trust")
+diag3 <- residual_diagnostics(comparison_over4_region_df, "actual_AE_over4_pct", "pred_") %>% mutate(Task = "% Over 4h by Region")
+diag4 <- residual_diagnostics(comparison_over4_trust_df,  "actual_AE_over4_pct", "pred_") %>% mutate(Task = "% Over 4h by Trust")
+
+resid_all <- bind_rows(diag1, diag2, diag3, diag4)
+
+# === Add interpretability levels manually ===
+interpretability_levels <- tibble::tibble(
+  Model = c("lm", "prophet", "rf", "xgb"),
+  Interpretability = c("High", "Medium", "Low", "Low")
+)
+
+# === Merge everything into full master table ===
+all_model_metrics_full <- all_model_metrics %>%
+  left_join(resid_all, by = c("Task", "Model")) %>%
+  left_join(interpretability_levels, by = "Model")
+
+# View the enriched table
+print(all_model_metrics_full)
+
+# Optional: save to CSV
+write.csv(all_model_metrics_full, "all_model_metrics_full.csv", row.names = FALSE)
+
+library(DT)
+library(htmlwidgets)
+
+# Build and assign your styled datatable to a variable
+model_table <- datatable(
+  final_display,
+  options = list(pageLength = 20, scrollX = TRUE),
+  rownames = FALSE,
+  caption = "📊 Model Evaluation Summary with Color Gradients"
+) %>%
+  formatStyle("pct_RMSE", background = styleColorBar(range(final_display$pct_RMSE, na.rm = TRUE), 'lightgreen')) %>%
+  formatStyle("pct_MAE",  background = styleColorBar(range(final_display$pct_MAE,  na.rm = TRUE), 'lightgreen')) %>%
+  formatStyle("R2",       background = styleColorBar(range(final_display$R2,       na.rm = TRUE), 'lightgreen')) %>%
+  formatStyle("Stability_Rank", background = styleColorBar(range(final_display$Stability_Rank, na.rm = TRUE), 'lightgreen')) %>%
+  formatStyle("Residual_Mean",  background = styleColorBar(range(final_display$Residual_Mean,  na.rm = TRUE), 'tomato')) %>%
+  formatStyle("Residual_SD",    background = styleColorBar(range(final_display$Residual_SD,    na.rm = TRUE), 'tomato'))
+
+# Save the widget to an HTML file
+saveWidget(model_table, file = "model_evaluation_table.html", selfcontained = TRUE)
+
+install.packages("pagedown")
+library(pagedown)
+
+# Save the widget first if not done yet
+saveWidget(model_table, "model_evaluation_table.html", selfcontained = TRUE)
+
+# Convert HTML to PDF
+pagedown::chrome_print("model_evaluation_table.html", output = "model_evaluation_table.pdf")
