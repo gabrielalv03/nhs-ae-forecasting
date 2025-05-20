@@ -1,0 +1,191 @@
+library(dplyr)
+library(ggplot2)
+
+# === Step 0: Define Theme ===
+theme_nhs <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title.position = "plot",
+    plot.title          = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle       = element_text(hjust = 0.5),
+    legend.position     = "bottom",
+    legend.key          = element_rect(fill = "white", linewidth = 0),
+    axis.text.x         = element_text(angle = 30, hjust = 1),
+    axis.text.y         = element_text(),
+    axis.title.x        = element_text(size = 14),
+    axis.title.y        = element_text(size = 14),
+    panel.grid.major    = element_line(color = "grey80", linewidth = 0.3),
+    panel.grid.minor    = element_blank(),
+    panel.border        = element_rect(color = "grey80", fill = NA, linewidth = 0.3)
+  )
+
+theme_set(theme_nhs)
+
+# === Step 1: Build Error DF ===
+# === Step 1: Build Regional Error DF ===
+regional_error_df <- comparison_over4_region_df %>%
+  rename(date = ds) %>%
+  filter(date >= as.Date("2024-07-01") & date <= as.Date("2024-12-31")) %>%
+  mutate(
+    actual_pct    = actual_AE_over4_pct,
+    predicted_pct = pred_xgb_AE_over4_pct,
+    residual      = actual_pct - predicted_pct
+  )
+
+# === Step 2: Build Historical DF ===
+historical_df <- train_data %>%  # replace with correct training set if needed
+  filter(date >= as.Date("2022-01-01") & date <= as.Date("2024-06-30")) %>%
+  group_by(region, date) %>%
+  summarise(over4_pct = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop")
+
+# === Step 3: Plot per region ===
+unique_regions <- unique(comparison_over4_region_df$region)
+
+for (r in unique_regions) {
+  plot_df_hist <- historical_df %>% filter(region == r)
+  plot_df_fore <- regional_error_df %>% filter(region == r)
+  
+  mae  <- mean(abs(plot_df_fore$actual_pct - plot_df_fore$predicted_pct))
+  rmse <- sqrt(mean((plot_df_fore$actual_pct - plot_df_fore$predicted_pct)^2))
+  
+  p <- ggplot() +
+    annotate("rect", xmin = as.Date("2024-07-01"), xmax = as.Date("2024-12-31"),
+             ymin = -Inf, ymax = Inf, fill = "blue", alpha = 0.1) +
+    
+    geom_segment(data = plot_df_fore,
+                 aes(x = date, xend = date, y = actual_pct, yend = predicted_pct),
+                 color = "red", alpha = 0.5) +
+    
+    geom_line(data = plot_df_hist,
+              aes(x = date, y = over4_pct, color = "Actual", linetype = "Actual"), size = 1.1) +
+    
+    geom_point(data = plot_df_fore,
+               aes(x = date, y = actual_pct, color = "Actual"), size = 2) +
+    
+    geom_line(data = plot_df_fore,
+              aes(x = date, y = predicted_pct, color = "Forecast", linetype = "Forecast"), size = 1.1) +
+    geom_point(data = plot_df_fore,
+               aes(x = date, y = predicted_pct, color = "Forecast"), size = 2) +
+    
+    scale_color_manual(values = c("Actual" = "black", "Forecast" = "steelblue")) +
+    scale_linetype_manual(values = c("Actual" = "solid", "Forecast" = "dotted")) +
+    
+    labs(
+      title = paste0(r),
+      subtitle = paste0("MAE = ", round(mae, 2), ", RMSE = ", round(rmse, 2)),
+      x = "Date",
+      y = "% Attendances > 4 Hours",
+      color = "Data Type",
+      linetype = "Data Type"
+    ) +
+    theme_nhs
+  
+  print(p)
+}
+
+# === Step 1: Summarise national-level forecast ===
+national_totals <- comparison_over4_region_df %>%
+  rename(date = ds) %>%
+  group_by(date) %>%
+  summarise(
+    actual = mean(actual_AE_over4_pct, na.rm = TRUE),
+    predicted = mean(pred_xgb_AE_over4_pct, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# === Step 2: Compute MAE and RMSE ===
+mae <- mean(abs(national_totals$actual - national_totals$predicted))
+rmse <- sqrt(mean((national_totals$actual - national_totals$predicted)^2))
+
+# === Step 3: Filter forecast window ===
+error_df <- national_totals %>%
+  filter(date >= as.Date("2024-07-01") & date <= as.Date("2024-12-31")) %>%
+  mutate(residual = actual - predicted)
+
+# === Step 4: Historical actuals (2022–mid 2024) ===
+national_historical_df <- train_data %>%
+  filter(date >= as.Date("2022-01-01") & date <= as.Date("2024-06-30")) %>%
+  group_by(date) %>%
+  summarise(over4_pct = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop")
+
+# === Step 5: Plot ===
+ggplot() +
+  # Forecast shading
+  annotate("rect", xmin = as.Date("2024-07-01"), xmax = as.Date("2024-12-31"),
+           ymin = -Inf, ymax = Inf, fill = "blue", alpha = 0.1) +
+  
+  # Red error segments
+  geom_segment(data = error_df,
+               aes(x = date, xend = date, y = actual, yend = predicted),
+               color = "red", alpha = 0.5) +
+  
+  # Historical actuals
+  geom_line(data = national_historical_df,
+            aes(x = date, y = over4_pct, color = "Actual", linetype = "Actual"), size = 1.1) +
+  
+  # Actual forecasted points
+  geom_point(data = error_df,
+             aes(x = date, y = actual, color = "Actual"), size = 2) +
+  
+  # Forecasted points and line
+  geom_line(data = error_df,
+            aes(x = date, y = predicted, color = "Forecast", linetype = "Forecast"), size = 1.1) +
+  geom_point(data = error_df,
+             aes(x = date, y = predicted, color = "Forecast"), size = 2) +
+  
+  # Styling
+  scale_color_manual(values = c("Actual" = "black", "Forecast" = "steelblue")) +
+  scale_linetype_manual(values = c("Actual" = "solid", "Forecast" = "dotted")) +
+  labs(
+    title = "National",
+    subtitle = paste0("MAE = ", round(mae, 2), ", RMSE = ", round(rmse, 2)),
+    x = "Date",
+    y = "% Attendances > 4 Hours",
+    color = "Data Type",
+    linetype = "Data Type"
+  )
+
+library(xgboost)
+library(ggplot2)
+library(dplyr)
+
+# Step 1: Get importance matrix
+importance_df <- xgb.importance(model = xgb_model_over4_region)
+
+# Step 2: Rename variables
+rename_map <- c(
+  weighted_imd        = "Weighted IMD",
+  population_density  = "Population Density",
+  gp_patients_per_gp  = "GP Patients/GP",
+  temperature          = "Temperature",
+  covid_percent        = "COVID Positivity Rate",
+  flu_percent          = "Flu Positivity Rate",
+  season               = "Season",
+  bank_holiday_number  = "Bank Holiday Number"
+)
+
+importance_df$Feature <- recode(importance_df$Feature, !!!rename_map)
+
+# Step 3: Optional – drop region and date if present
+importance_df <- importance_df %>%
+  filter(!(Feature %in% c("date", "region")))
+
+importance_df <- importance_df %>%
+  mutate(Feature = case_when(
+    grepl("^season", Feature) ~ "Season",
+    TRUE ~ Feature
+  )) %>%
+  group_by(Feature) %>%
+  summarise(Gain = sum(Gain)) %>%
+  ungroup()
+
+# Step 5: Plot using ggplot2
+ggplot(importance_df, aes(x = reorder(Feature, Gain), y = Gain)) +
+  geom_col(fill = "darkorange") +
+  coord_flip() +
+  scale_y_continuous(labels = scales::label_percent()) +
+  labs(
+    title = "Feature Importance – XGBoost (% Attendances > 4 Hours)",
+    x = "Feature",
+    y = "Relative Importance (Gain)"
+  ) +
+  theme_nhs
