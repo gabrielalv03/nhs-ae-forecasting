@@ -1,0 +1,140 @@
+library(dplyr)
+library(ggplot2)
+
+# === Step 0: Set NHS Theme ===
+theme_nhs <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title.position = "plot",
+    plot.title          = element_text(hjust = 0.5, face = "bold"),
+    legend.position     = "bottom",
+    legend.key          = element_rect(fill = "white", linewidth = 0),
+    axis.text.x         = element_text(angle = 30, hjust = 1),
+    axis.text.y         = element_text(),
+    axis.title.x        = element_text(size = 14),
+    axis.title.y        = element_text(size = 14),
+    panel.grid.major    = element_line(color = "grey80", linewidth = 0.3),
+    panel.grid.minor    = element_blank(),
+    panel.border        = element_rect(color = "grey80", fill = NA, linewidth = 0.3)
+  )
+
+theme_set(theme_nhs)
+
+# === Step 1: Recalculate RMSE/MAE on aggregated data ===
+rf_totals <- comparison_att_region_df %>%
+  group_by(date = ds) %>%
+  summarise(
+    actual = sum(actual_AE_att_tot),
+    predicted = sum(pred_rf_AE_att_tot),
+    .groups = "drop"
+  )
+
+mae  <- mean(abs(rf_totals$actual - rf_totals$predicted))
+rmse <- sqrt(mean((rf_totals$actual - rf_totals$predicted)^2))
+
+# === Step 2: Create error_df for plotting (Jul–Dec 2024 only) ===
+error_df <- rf_totals %>%
+  filter(date >= as.Date("2024-07-01") & date <= as.Date("2024-12-31")) %>%
+  mutate(type = "Forecast", residual = actual - predicted)
+
+# === Step 3: Bring in historical actuals from 2022–mid-2024 ===
+historical_df <- train_data %>%
+  filter(date >= as.Date("2022-01-01") & date <= as.Date("2024-06-30")) %>%
+  group_by(date) %>%
+  summarise(attendances = sum(AE_att_tot, na.rm = TRUE), .groups = "drop") %>%
+  mutate(type = "Actual")
+
+historical_df <- historical_df %>%
+  mutate(attendances = attendances / 1e5)
+
+error_df <- error_df %>%
+  mutate(actual = actual / 1e5,
+         predicted = predicted / 1e5)
+
+# === Step 4: Plot ===
+ggplot() +
+  # Forecast period shading
+  annotate("rect", xmin = as.Date("2024-07-01"), xmax = as.Date("2024-12-31"),
+           ymin = -Inf, ymax = Inf, fill = "blue", alpha = 0.2) +
+  
+  # Red error lines
+  geom_segment(data = error_df,
+               aes(x = date, xend = date, y = actual, yend = predicted),
+               color = "red", alpha = 0.5) +
+  
+  # Historical actuals
+  geom_line(data = historical_df,
+            aes(x = date, y = attendances, color = "Actual", linetype = "Actual"), size = 1.1) +
+  
+  # Actual points (Jul–Dec 2024)
+  geom_point(data = error_df,
+             aes(x = date, y = actual, color = "Actual"), size = 2) +
+  
+  # Forecast line and points
+  geom_line(data = error_df,
+            aes(x = date, y = predicted, color = "Forecast", linetype = "Forecast"), size = 1.1) +
+  geom_point(data = error_df,
+             aes(x = date, y = predicted, color = "Forecast"), size = 2) +
+  
+  # Style
+  scale_color_manual(values = c("Actual" = "black", "Forecast" = "steelblue")) +
+  scale_linetype_manual(values = c("Actual" = "solid", "Forecast" = "dotted")) +
+  labs(
+    x = "Date",
+    y = expression("Monthly Attendances ("*10^5*")"),
+    color = "Data Type",
+    linetype = "Data Type"
+  )
+
+unique_regions <- unique(comparison_att_region_df$region)
+
+error_df <- comparison_att_region_df %>%
+  rename(date = ds) %>%
+  filter(date >= as.Date("2024-07-01") & date <= as.Date("2024-12-31")) %>%
+  mutate(
+    actual_scaled    = actual_AE_att_tot / 1e5,
+    predicted_scaled = pred_rf_AE_att_tot / 1e5,
+    residual         = actual_AE_att_tot - pred_rf_AE_att_tot
+  )
+
+for (r in unique_regions) {
+  plot_df_hist <- historical_df %>% filter(region == r)
+  plot_df_fore <- error_df %>% filter(region == r)
+  
+  # Calculate RMSE and MAE on non scaled values
+  mae  <- mean(abs(plot_df_fore$actual_AE_att_tot - plot_df_fore$pred_rf_AE_att_tot))
+  rmse <- sqrt(mean((plot_df_fore$actual_AE_att_tot - plot_df_fore$pred_rf_AE_att_tot)^2))
+  
+  p <- ggplot() +
+    annotate("rect", xmin = as.Date("2024-07-01"), xmax = as.Date("2024-12-31"),
+             ymin = -Inf, ymax = Inf, fill = "blue", alpha = 0.1) +
+    
+    geom_segment(data = plot_df_fore,
+                 aes(x = date, xend = date, y = actual_scaled, yend = predicted_scaled),
+                 color = "red", alpha = 0.5) +
+    
+    geom_line(data = plot_df_hist,
+              aes(x = date, y = attendances_scaled, color = "Actual", linetype = "Actual"), size = 1.1) +
+    
+    geom_point(data = plot_df_fore,
+               aes(x = date, y = actual_scaled, color = "Actual"), size = 2) +
+    
+    geom_line(data = plot_df_fore,
+              aes(x = date, y = predicted_scaled, color = "Forecast", linetype = "Forecast"), size = 1.1) +
+    geom_point(data = plot_df_fore,
+               aes(x = date, y = predicted_scaled, color = "Forecast"), size = 2) +
+    
+    scale_color_manual(values = c("Actual" = "black", "Forecast" = "steelblue")) +
+    scale_linetype_manual(values = c("Actual" = "solid", "Forecast" = "dotted")) +
+    
+    labs(
+      title = paste0("Forecast vs Actual – ", r),
+      subtitle = paste0("MAE = ", round(mae, 2), ", RMSE = ", round(rmse, 2)),
+      x = "Date",
+      y = expression("Monthly Attendances ("*10^5*")"),
+      color = "Data Type",
+      linetype = "Data Type"
+    ) +
+    theme_nhs
+  
+  print(p)
+}
