@@ -21,11 +21,11 @@ theme_nhs <- theme_minimal(base_size = 13) +
 theme_set(theme_nhs)
 
 # === Step 1: Recalculate RMSE/MAE on aggregated data ===
-rf_totals <- comparison_att_region_df %>%
+rf_totals <- comparison_over4_region_df %>%
   group_by(date = ds) %>%
   summarise(
-    actual = sum(actual_AE_att_tot),
-    predicted = sum(pred_rf_AE_att_tot),
+    actual = sum(actual_AE_over4_pct),
+    predicted = sum(pred_rf_AE_over4_pct),
     .groups = "drop"
   )
 
@@ -152,4 +152,50 @@ for (r in unique_regions) {
   
   print(p)
 }
+
+library(dplyr)
+library(ggplot2)
+
+# === Step 1: Get variable importance ===
+importance_df <- as.data.frame(importance(rf_attendance_region))
+importance_df$Feature <- rownames(importance_df)
+
+# Exclude 'date' and 'region'
+importance_df <- importance_df %>%
+  filter(!(Feature %in% c("date", "region")))
+
+# Rename predictors for display
+rename_map <- c(
+  weighted_imd        = "Weighted IMD",
+  population_density  = "Population Density",
+  gp_patients_per_gp  = "GP Patients/GP",
+  temperature          = "Temperature",
+  covid_percent        = "COVID Positivity Rate",
+  flu_percent          = "Flu Positivity Rate",
+  season               = "Season",
+  bank_holiday_number  = "Bank Holiday Number"
+)
+
+importance_df$Feature <- recode(importance_df$Feature, !!!rename_map)
+
+# Detect importance column
+importance_col <- if ("IncNodePurity" %in% names(importance_df)) {
+  "IncNodePurity"
+} else if ("%IncMSE" %in% names(importance_df)) {
+  "%IncMSE"
+} else {
+  stop("Could not detect an importance column")
+}
+
+# === Step 2: Plot ===
+ggplot(importance_df, aes(x = reorder(Feature, .data[[importance_col]]), y = .data[[importance_col]])) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Feature Importance – Random Forest (Attendances)",
+    x = "Feature",
+    y = importance_col
+  ) +
+  theme_nhs
+
 
