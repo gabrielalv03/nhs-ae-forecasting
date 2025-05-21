@@ -1,4 +1,4 @@
-# Socioeconomic Data Sources
+# Temperature Data Sources
 
 This is the original link to the temperature data used in this project:
 
