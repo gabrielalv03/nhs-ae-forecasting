@@ -80,20 +80,41 @@ prepare_map_data_over4 <- function(reg, hm, em) {
 # ──────────────────────────────────────────────────────────────────────────────
 # 6. Map with NO legend (guide = "none")
 # ──────────────────────────────────────────────────────────────────────────────
-plot_map_no_legend <- function(map_df) {
+plot_map_with_scale <- function(map_df) {
   ggplot(map_df) +
     geom_sf(aes(fill = pct_change),
             color     = "white",
             linewidth = 0.3) +
-    scale_fill_viridis_c(option = "C", guide = "none") +
+    scale_fill_viridis_c(
+      name   = "% Change",
+      option = "C",
+      labels = scales::percent,
+      guide  = guide_colorbar(
+        title.position  = "top",
+        barwidth        = unit(0.5, "cm"),
+        barheight       = unit(5,   "cm"),
+        title.hjust     = 0.5
+      )
+    ) +
     labs(
       title    = "Forecasted % A&E Attendances > 4h Surge by NHS Region",
       subtitle = "Jul–Dec 2024 vs Jan–Jun 2024"
     ) +
     theme_minimal() +
     theme(
-      plot.title   = element_text(hjust = 0.5),
-      plot.subtitle= element_text(hjust = 0.5)
+      plot.title        = element_text(hjust = 0.5),
+      plot.subtitle     = element_text(hjust = 0.5),
+      
+      # move the legend to the right, outside the plot area:
+      legend.position   = c(1.1, 0.5),
+      legend.justification = c(0, 0.5),
+      
+      # enlarge the right margin so it actually has space:
+      plot.margin       = margin(t = 5, r = 40, b = 5, l = 5),
+      
+      legend.title      = element_text(size = 9, face = "bold"),
+      legend.text       = element_text(size = 8),
+      legend.background = element_blank()
     )
 }
 
@@ -142,7 +163,22 @@ create_legend_plot_over4 <- function(map_df, n_cols = 2) {
 # ──────────────────────────────────────────────────────────────────────────────
 # 8. Build & draw
 # ──────────────────────────────────────────────────────────────────────────────
-map_plot    <- plot_map_no_legend(map_df_over4)
+shp_dir  <- "~/Downloads/NHS_England_Regions_January_2024_EN_BGC_7344996574699915597"
+shp_file <- file.path(shp_dir, "NHSER_JAN_2024_EN_BGC.shp")
+
+# Verify it exists:
+file.exists(shp_file)   # should return TRUE
+
+# Then read:
+regions_sf <- load_regions_map(shp_file)
+
+# — compute the over-4h forecast vs baseline
+hm_over4     <- calculate_forecast_baseline_over4(comparison_over4_region_df, train_data)
+em_over4     <- calculate_error_metrics_over4(comparison_over4_region_df)
+
+# — join into one sf object
+map_df_over4 <- prepare_map_data_over4(regions_sf, hm_over4, em_over4)
+map_plot <- plot_map_with_scale(map_df_over4)
 legend_plot <- create_legend_plot_over4(map_df_over4, n_cols = 2)
 
 grid.arrange(
