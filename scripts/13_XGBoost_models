@@ -132,20 +132,19 @@ library(dplyr)
 test_ready <- test_data %>%
   mutate(across(where(is.character), ~ na_if(., "-"))) %>%
   mutate(
-    across(c(AE_att_tot, AE_over4_pct, all_of(xgb_features)), as.numeric),
+    across(all_of(xgb_features), as.numeric),
     season = as.factor(season)
-  )
+  ) %>%
+  filter(if_all(all_of(xgb_features), ~ !is.na(.)))
 
 # 1b) Region‐level matrices
 xgb_region_test <- test_ready %>%
   group_by(region, date, season) %>%
   summarise(
-    AE_att_tot     = sum(AE_att_tot, na.rm=TRUE),
-    AE_over4_pct   = mean(AE_over4_pct, na.rm=TRUE),
-    across(all_of(xgb_features), ~ mean(.x, na.rm=TRUE)),
+    across(all_of(xgb_features), ~ mean(.x, na.rm = TRUE)),
     .groups = "drop"
   ) %>%
-  filter(if_all(everything(), ~ !is.na(.))) 
+  filter(if_all(all_of(xgb_features), ~ !is.na(.)))
 
 # Build the design matrices exactly as you did when fitting
 region_mat_att   <- cbind(
@@ -158,12 +157,10 @@ region_mat_over4 <- region_mat_att  # same structure except the label changes
 xgb_trust_test <- test_ready %>%
   group_by(name, date, season) %>%
   summarise(
-    AE_att_tot     = sum(AE_att_tot, na.rm=TRUE),
-    AE_over4_pct   = mean(AE_over4_pct, na.rm=TRUE),
-    across(all_of(xgb_features), ~ mean(.x, na.rm=TRUE)),
+    across(all_of(xgb_features), ~ mean(.x, na.rm = TRUE)),
     .groups = "drop"
   ) %>%
-  filter(if_all(everything(), ~ !is.na(.)))
+  filter(if_all(all_of(xgb_features), ~ !is.na(.)))
 
 trust_mat_att   <- cbind(
   model.matrix(~ season - 1, xgb_trust_test),
@@ -197,4 +194,4 @@ pred_xgb_over4_region <- test_with_xgb_region$pred_xgb_over4_region
 
 # Verify
 length(pred_xgb_att_region)       # should be 710
-length(pred_xgb_over4_region)     # should be 710
+length(pred_xgb_over4_region)     # should be 710        
