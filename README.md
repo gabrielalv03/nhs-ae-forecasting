@@ -7,16 +7,7 @@ This project uses machine learning to forecast pressure in NHS Accident & Emerge
 
 ## 📁 Project Structure
 
-.
-├── data/ # Raw and cleaned input data
-│ ├── socioeconomic_data/ # IMD, population, GP access, etc.
-│ ├── links.md # External links to raw data sources
-├── scripts/ # R scripts for data prep, modelling, and visualisation
-├── README.md # Project overview
-
-yaml
-Copy
-Edit
+<pre> ## 🗂️ Project Structure ``` . ├── data/ # Raw and cleaned input data │ ├── socioeconomic_data/ # IMD, population, GP access, etc. │ └── links.md # External links to raw data sources ├── scripts/ # R scripts for data prep, modelling, and visualisation ├── README.md # Project overview ├── LICENSE # MIT License ``` </pre>
 
 ---
 
@@ -31,11 +22,7 @@ Edit
 
 ## 📊 Data Sources
 
-- 📅 [A&E Attendances – NHS England](https://www.england.nhs.uk/statistics/statistical-work-areas/ae-waiting-times-and-activity/)
-- 🏘️ [Indices of Multiple Deprivation (IMD)](https://www.gov.uk/government/statistics/english-indices-of-deprivation-2019)
-- 🌡️ [Met Office Temperature Data](https://www.metoffice.gov.uk/)
-- 🦠 [Flu & COVID Surveillance – UKHSA](https://www.gov.uk/government/statistics)
-- 🩺 [GP Patient Data](https://digital.nhs.uk/data-and-information/data-tools-and-services/data-services/general-practice-data-hub)
+The data sources are all in the "data" directory
 
 ---
 
@@ -49,7 +36,6 @@ The following models were trained on 10 years of monthly data and evaluated on 2
 | Random Forest | Nonlinear      | Feature importance       |
 | XGBoost       | Ensemble       | Highest accuracy (A)     |
 | Prophet       | Time series    | Captures seasonality     |
-| LSTM          | Deep learning  | Best for smooth % delay  |
 
 ---
 
@@ -68,12 +54,4 @@ The following models were trained on 10 years of monthly data and evaluated on 2
 1. Clone this repo:
    ```bash
    git clone https://github.com/gabrielalv03/nhs-ae-forecasting.git
-Open scripts/ and run in order:
-
-01_cleaning.R
-
-02_feature_engineering.R
-
-03_modelling.R
-
-04_evaluation.R
+Open scripts/ and run in order
