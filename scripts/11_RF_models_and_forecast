@@ -140,15 +140,14 @@ pred_rf_att_trust <- predict(rf_attendance_trust, newdata = test_data)
 # Random forest model predictions: AE_over4_pct for region and trust
 # 1) Prepare your region–date feature frame exactly as in training
 rf_test_over4_region_feats <- test_data %>%
-  # match the same type conversions you did for train
   mutate(
-    AE_over4_pct = as.numeric(AE_over4_pct),
+    # Convert only predictors, NOT targets since they don't exist here
     across(all_of(numeric_predictors), as.numeric),
     across(all_of(categorical_predictors), as.factor)
   ) %>%
   group_by(region, date) %>%
   summarise(
-    # summarise predictors exactly like in rf_over4_region_data
+    # Summarise predictors exactly as in training data
     across(all_of(numeric_predictors), ~ mean(.x, na.rm = TRUE)),
     season = first(season),
     .groups = "drop"
@@ -170,3 +169,4 @@ test_with_region4 <- test_data %>%
 pred_rf_over4_region <- test_with_region4$pred_rf_over4_region
 
 pred_rf_over4_trust <- predict(rf_over4_trust, newdata = test_data)
+
