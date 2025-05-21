@@ -7,7 +7,13 @@ This project uses machine learning to forecast pressure in NHS Accident & Emerge
 
 ## 📁 Project Structure
 
-<pre> ## 🗂️ Project Structure ``` . ├── data/ # Raw and cleaned input data │ ├── socioeconomic_data/ # IMD, population, GP access, etc. │ └── links.md # External links to raw data sources ├── scripts/ # R scripts for data prep, modelling, and visualisation ├── README.md # Project overview ├── LICENSE # MIT License ``` </pre>
+<pre> ## 🗂️ Project Structure ``` . 
+   ├── data/ # Raw and cleaned input data │ 
+   ├── socioeconomic_data/ # IMD, population, GP access, etc. 
+   │ └── links.md # External links to raw data sources 
+   ├── scripts/ # R scripts for data prep, modelling, and visualisation 
+   ├── README.md # Project overview 
+   ├── LICENSE # MIT License ``` </pre>
 
 ---
 
