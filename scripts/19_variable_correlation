@@ -1,0 +1,166 @@
+# Load necessary libraries
+library(ggplot2)
+library(GGally)
+library(dplyr)
+library(reshape2)
+library(Hmisc)  
+library(dplyr)
+
+# === Step 0: Define Theme ===
+theme_nhs <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title.position = "plot",
+    plot.title          = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle       = element_text(hjust = 0.5),
+    legend.position     = "bottom",
+    legend.key          = element_rect(fill = "white", linewidth = 0),
+    axis.text.x         = element_text(angle = 30, hjust = 1),
+    axis.text.y         = element_text(),
+    axis.title.x        = element_text(size = 14),
+    axis.title.y        = element_text(size = 14),
+    panel.grid.major    = element_line(color = "grey80", linewidth = 0.3),
+    panel.grid.minor    = element_blank(),
+    panel.border        = element_rect(color = "grey80", fill = NA, linewidth = 0.3)
+  )
+
+theme_set(theme_nhs)
+
+# Rename map
+rename_map <- c(
+  AE_att_tot           = "Total A&E Attendances",
+  AE_over4_pct         = "% A&E Attendances > 4h",
+  weighted_imd         = "Weighted IMD",
+  population_density   = "Population Density",
+  gp_patients_per_gp   = "GP Patients/GP",
+  temperature          = "Temperature",
+  covid_percent        = "COVID Positivity Rate",
+  flu_percent          = "Flu Positivity Rate",
+  bank_holiday_number  = "Bank Holiday Number"
+)
+
+# Prepare numeric data
+numeric_train_data <- train_data %>%
+  select(where(is.numeric)) %>%
+  drop_na()
+
+numeric_train_data <- numeric_train_data %>%
+  select(-day_num)
+
+# Compute correlations and p-values
+rcorr_res <- rcorr(as.matrix(numeric_train_data))
+cor_mat <- rcorr_res$r
+p_mat <- rcorr_res$P
+
+# Melt and join correlation + p-values
+melted_cor <- melt(cor_mat, varnames = c("Var1", "Var2"), value.name = "correlation")
+melted_p <- melt(p_mat, varnames = c("Var1", "Var2"), value.name = "p_value")
+merged_df <- left_join(melted_cor, melted_p, by = c("Var1", "Var2"))
+
+# Apply renaming
+merged_df$Var1 <- recode(merged_df$Var1, !!!rename_map)
+merged_df$Var2 <- recode(merged_df$Var2, !!!rename_map)
+
+# Remove NA rows
+merged_df <- merged_df %>%
+  filter(!is.na(Var1) & !is.na(Var2))
+
+# Order by average absolute correlation
+order_vars <- merged_df %>%
+  group_by(Var1) %>%
+  summarise(avg_abs_cor = mean(abs(correlation), na.rm = TRUE)) %>%
+  arrange(desc(avg_abs_cor)) %>%
+  pull(Var1)
+
+merged_df$Var1 <- factor(merged_df$Var1, levels = order_vars)
+merged_df$Var2 <- factor(merged_df$Var2, levels = order_vars)
+
+# Optional: significance stars
+merged_df$signif <- case_when(
+  merged_df$p_value <= 0.001 ~ "***",
+  merged_df$p_value <= 0.01  ~ "**",
+  merged_df$p_value <= 0.05  ~ "*",
+  TRUE ~ ""
+)
+
+# Plot with p-value stars and axis labels
+ggplot(merged_df, aes(Var1, Var2, fill = correlation)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = signif), size = 3) +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white",
+                       midpoint = 0, limit = c(-1,1),
+                       name = "Correlation") +
+  labs(x = "Variables", y = "Variables") +
+  coord_fixed() +
+  theme_nhs +  # use your custom theme
+  theme(
+    legend.position = "right",
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+
+# === Target 1: Total A&E Attendances ===
+# Step 1: Extract top correlations from merged_df
+target1 <- "Total A&E Attendances"
+
+plot_data1 <- merged_df %>%
+  filter((Var1 == target1 & Var2 != target1) | (Var2 == target1 & Var1 != target1)) %>%
+  mutate(other_var = ifelse(Var1 == target1, as.character(Var2), as.character(Var1))) %>%
+  select(other_var, correlation) %>%
+  distinct(other_var, .keep_all = TRUE) %>%
+  arrange(desc(abs(correlation))) %>%
+  head(10)
+
+# Step 2: Create named vector AND preserve names after sorting
+cor_vec <- setNames(plot_data1$correlation, plot_data1$other_var)
+
+# 🔥 Correct sorting that preserves names
+sorted_indices <- order(cor_vec)
+sorted_cor_vec <- cor_vec[sorted_indices]
+
+# Step 3: Plot
+old_par <- par(no.readonly = TRUE)
+par(mar = c(5, 12, 4, 2))
+
+barplot(
+  sorted_cor_vec,
+  horiz = TRUE,
+  col = "#005EB8",
+  las = 1,
+  cex.names = 0.9,
+  xlab = "Correlation",
+  main = "Top Correlations with Total A&E Attendances"
+)
+
+par(old_par)
+
+# Step 1: Extract top correlations from merged_df
+target2 <- "% A&E Attendances > 4h"
+
+plot_data2 <- merged_df %>%
+  filter((Var1 == target2 & Var2 != target2) | (Var2 == target2 & Var1 != target2)) %>%
+  mutate(other_var = ifelse(Var1 == target2, as.character(Var2), as.character(Var1))) %>%
+  select(other_var, correlation) %>%
+  distinct(other_var, .keep_all = TRUE) %>%
+  arrange(desc(abs(correlation))) %>%
+  head(10)
+
+# Step 2: Create named vector AND preserve names after sorting
+cor_vec2 <- setNames(plot_data2$correlation, plot_data2$other_var)
+sorted_indices2 <- order(cor_vec2)
+sorted_cor_vec2 <- cor_vec2[sorted_indices2]
+
+# Step 3: Plot
+old_par <- par(no.readonly = TRUE)
+par(mar = c(5, 12, 4, 2))
+
+barplot(
+  sorted_cor_vec2,
+  horiz = TRUE,
+  col = "#005EB8",
+  las = 1,
+  cex.names = 0.9,
+  xlab = "Correlation",
+  main = "Top Correlations with % A&E Attendances > 4h"
+)
+
+par(old_par)
