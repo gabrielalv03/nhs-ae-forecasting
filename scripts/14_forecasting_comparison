@@ -4,8 +4,22 @@ library(dplyr)
 # 1) Attendance by Region
 # ——————————————————————————————————————————————————————————
 
+# Ensure date column is in Date format
+cleaned_full_social_nhs_data <- cleaned_full_social_nhs_data %>%
+  mutate(date = as.Date(date))  # or mutate(ds = as.Date(ds)) depending on column name
+
+# Filter for last 6 months of 2024
+test_data_AE <- cleaned_full_social_nhs_data %>%
+  mutate(date = as.Date(date)) %>%
+  filter(date >= as.Date("2024-07-01") & date <= as.Date("2024-12-31")) %>%
+  select(region, name, date, AE_att_tot, AE_per4_all, weighted_imd, season, flu_percent, covid_percent, bank_holiday_number, temperature, population_density, gp_patients_per_gp) %>%
+  mutate(
+    AE_over4_pct = 1 - AE_per4_all
+  ) %>%
+  rename(ds = date)
+
 # 1) Region–date truth: sum the real attends across all trusts
-region_truth <- prophet_test_data %>%
+region_truth <- test_data_AE %>%
   group_by(region, ds) %>%
   summarise(
     actual_AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
@@ -19,7 +33,8 @@ region_preds_raw <- tibble(
   ds           = prophet_test_data$ds,
   pred_lm_AE_att_tot      = pred_lm_att_region,
   pred_rf_AE_att_tot      = pred_rf_att_region,
-  pred_prophet_AE_att_tot = pred_prophet_att_region
+  pred_prophet_AE_att_tot = pred_prophet_att_region,
+  pred_xgb_AE_att_tot = pred_xgb_att_region
 )
 
 # 3) Deduplicate to exactly one row per (region, ds):
@@ -37,7 +52,7 @@ comparison_att_region_df <- region_truth %>%
 # ——————————————————————————————————————————————————————————
 
 # a) True attendances summed per trust–date
-trust_truth <- prophet_test_data %>%
+trust_truth <- test_data_AE %>%
   group_by(name, ds) %>%
   summarise(
     actual_AE_att_tot = sum(AE_att_tot, na.rm = TRUE),
@@ -50,7 +65,8 @@ trust_preds_raw <- tibble(
   ds                     = prophet_test_data$ds,
   pred_lm_AE_att_tot     = pred_lm_att_trust,
   pred_rf_AE_att_tot     = pred_rf_att_trust,
-  pred_prophet_AE_att_tot= pred_prophet_att_trust
+  pred_prophet_AE_att_tot= pred_prophet_att_trust,
+  pred_xgb_AE_att_tot = pred_xgb_att_trust
 )
 
 # c) Deduplicate to one row per (name, ds)
@@ -67,7 +83,7 @@ comparison_att_trust_df <- trust_truth %>%
 # ——————————————————————————————————————————————————————————
 
 # a) True %>4h averaged per region–date
-region4_truth <- prophet_test_data %>%
+region4_truth <- test_data_AE %>%
   group_by(region, ds) %>%
   summarise(
     actual_AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
@@ -80,7 +96,8 @@ region4_preds_raw <- tibble(
   ds                        = prophet_test_data$ds,
   pred_lm_AE_over4_pct      = pred_lm_over4_region,
   pred_rf_AE_over4_pct      = pred_rf_over4_region,
-  pred_prophet_AE_over4_pct = pred_prophet_over4_region
+  pred_prophet_AE_over4_pct = pred_prophet_over4_region,
+  pred_xgb_AE_over4_tot = pred_xgb_over4_region
 )
 
 # c) One row per region–date
@@ -97,7 +114,7 @@ comparison_over4_region_df <- region4_truth %>%
 # ——————————————————————————————————————————————————————————
 
 # a) True %>4h averaged per trust–date
-trust4_truth <- prophet_test_data %>%
+trust4_truth <- test_data_AE %>%
   group_by(name, ds) %>%
   summarise(
     actual_AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
@@ -110,7 +127,8 @@ trust4_preds_raw <- tibble(
   ds                        = prophet_test_data$ds,
   pred_lm_AE_over4_pct      = pred_lm_over4_trust,
   pred_rf_AE_over4_pct      = pred_rf_over4_trust,
-  pred_prophet_AE_over4_pct = pred_prophet_over4_trust
+  pred_prophet_AE_over4_pct = pred_prophet_over4_trust,
+  pred_xgb_AE_over4_tot = pred_xgb_over4_trust
 )
 
 # c) One row per trust–date
@@ -124,6 +142,7 @@ comparison_over4_trust_df <- trust4_truth %>%
 
 # ——————————————————————————————————————————————————————————
 # Inspect results
+comparison_att_region_df
 comparison_att_trust_df
 comparison_over4_region_df
 comparison_over4_trust_df
