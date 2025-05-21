@@ -1,4 +1,4 @@
-# Socioeconomic Data Sources
+# COVID and Flu Data Sources
 
 These are the original links to the COVID and Flu positivity data used in this project:
 
