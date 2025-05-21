@@ -7,6 +7,8 @@ devtools::install_github("epiforecasts/covid19.nhs.data")
 # Load it
 library(covid19.nhs.data)
 library(dplyr)
+library(readxl)
+conflicts_prefer(dplyr::filter)
 
 mapping_raw <- load_mapping(scale = "utla", source = "link")
 
@@ -80,3 +82,4 @@ model_data <- model_data %>%
 clean_data <- final_data %>%
   filter(!is.na(weighted_imd) & !is.na(AE_att_tot)) %>%
   relocate(time_period, .after = date)
+
