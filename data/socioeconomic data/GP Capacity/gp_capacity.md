@@ -1,4 +1,4 @@
-# Socioeconomic Data Sources
+# GP Capacity Data Sources
 
 These are the original links to the GP capacity data used in this project:
 
