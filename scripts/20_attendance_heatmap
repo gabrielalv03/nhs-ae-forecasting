@@ -1,144 +1,98 @@
-# Load required libraries
-library(sf)
+# === LOAD LIBRARIES ===
 library(dplyr)
 library(ggplot2)
+library(sf)
 library(viridis)
-library(ggrepel)
 library(gridExtra)
 
-# === Function to load and prepare spatial data ===
-load_regions_map <- function(shapefile_path) {
-  st_read(shapefile_path) %>%
-    mutate(NHSER24NM = tolower(trimws(NHSER24NM)))
-}
+# === 1. Load and prepare map data ===
+regions_map <- st_read("NHSER_JAN_2024_EN_BGC.shp") %>%
+  mutate(NHSER24NM = tolower(trimws(NHSER24NM)))
 
-# === Function to calculate forecast and baseline aggregates ===
-calculate_forecast_baseline <- function(forecast_df, train_df) {
-  # Aggregate predicted attendances Jul-Dec 2024
-  forecast_summary <- forecast_df %>%
-    filter(ds >= as.Date("2024-07-01") & ds <= as.Date("2024-12-31")) %>%
-    group_by(region) %>%
-    summarise(predicted_att = sum(pred_rf_AE_att_tot, na.rm = TRUE), .groups = "drop")
-  
-  # Aggregate actual attendances Jan-Jun 2024
-  baseline_summary <- train_df %>%
-    filter(date >= as.Date("2024-01-01") & date <= as.Date("2024-06-30")) %>%
-    group_by(region) %>%
-    summarise(baseline_att = sum(AE_att_tot, na.rm = TRUE), .groups = "drop")
-  
-  # Calculate percentage change and clean region names
-  heatmap_data <- forecast_summary %>%
-    left_join(baseline_summary, by = "region") %>%
-    mutate(
-      region = tolower(trimws(gsub("^NHS England ", "", region))),
-      pct_change = (predicted_att - baseline_att) / baseline_att
-    )
-  
-  return(heatmap_data)
-}
+# === 2. Prepare forecast data ===
+# Predicted attendances for Jul–Dec 2024
+forecast_df <- comparison_att_region_df %>%
+  filter(ds >= as.Date("2024-07-01") & ds <= as.Date("2024-12-31")) %>%
+  group_by(region) %>%
+  summarise(predicted_att = sum(pred_rf_AE_att_tot, na.rm = TRUE), .groups = "drop")
 
-# === Function to compute error metrics (MAE and RMSE) for Jul-Dec 2024 ===
-calculate_error_metrics <- function(comparison_df) {
-  comparison_df %>%
-    filter(ds >= as.Date("2024-07-01") & ds <= as.Date("2024-12-31")) %>%
-    group_by(region) %>%
-    summarise(
-      mae = mean(abs(actual_AE_att_tot - pred_rf_AE_att_tot), na.rm = TRUE),
-      rmse = sqrt(mean((actual_AE_att_tot - pred_rf_AE_att_tot)^2, na.rm = TRUE)),
-      .groups = "drop"
-    ) %>%
-    mutate(region = tolower(trimws(gsub("^NHS England ", "", region))))
-}
+# Actual attendances for Jan–Jun 2024
+baseline_df <- train_data %>%
+  filter(date >= as.Date("2024-01-01") & date <= as.Date("2024-06-30")) %>%
+  group_by(region) %>%
+  summarise(baseline_att = sum(AE_att_tot, na.rm = TRUE), .groups = "drop")
 
-# === Function to prepare map data by joining spatial and metric data ===
-prepare_map_data <- function(regions_map, heatmap_data, error_metrics) {
-  map_df <- regions_map %>%
-    left_join(heatmap_data, by = c("NHSER24NM" = "region")) %>%
-    left_join(error_metrics, by = c("NHSER24NM" = "region"))
-  
-  return(map_df)
-}
-
-# === Function to create main heatmap plot with caption ===
-plot_heatmap <- function(map_df) {
-  # Create RMSE & % Change caption text
-  rmse_caption <- map_df %>%
-    st_drop_geometry() %>%
-    mutate(
-      label = paste0(
-        "• ", tools::toTitleCase(NHSER24NM),
-        ": RMSE = ", format(round(rmse), big.mark = ","),
-        "; Δ = ", scales::percent(pct_change, accuracy = 0.1)
-      )
-    ) %>%
-    pull(label) %>%
-    paste(collapse = "\n")
-  
-  ggplot(map_df) +
-    geom_sf(aes(fill = pct_change), color = "white", linewidth = 0.3) +
-    scale_fill_viridis_c(
-      name = "% Change",
-      labels = scales::percent,
-      option = "C"
-    ) +
-    labs(
-      title = "Forecasted A&E Attendance Surge by NHS Region",
-      subtitle = "Jul–Dec 2024 vs Jan–Jun 2024",
-      caption = paste("RMSE & % Change by Region:\n", rmse_caption)
-    ) +
-    theme_minimal() +
-    theme(
-      plot.caption = element_text(size = 8, hjust = 0, margin = margin(t = 10)),
-      legend.position = "none"  # **Hide built-in legend here**
-    )
-}
-
-# === Function to create legend table as a separate ggplot ===
-create_legend_plot <- function(map_df, n_cols = 2) {
-  legend_data <- map_df %>%
-    st_drop_geometry() %>%
-    mutate(
-      Region = tools::toTitleCase(NHSER24NM),
-      Label = paste0(Region, ": RMSE = ", format(round(rmse), big.mark = ","), "; Δ = ", round(pct_change * 100, 1), "%"),
-      Fill = pct_change
-    ) %>%
-    arrange(desc(pct_change))
-  
-  n_regions <- nrow(legend_data)
-  n_rows <- ceiling(n_regions / n_cols)
-  
-  legend_data <- legend_data %>%
-    mutate(
-      row = rep(1:n_rows, times = n_cols)[1:n_regions],
-      col = rep(1:n_cols, each = n_rows)[1:n_regions],
-      x = ifelse(col == 1, 1, 2.3),  # Adjust horizontal spacing
-      y = -row
-    )
-  
-  ggplot(legend_data) +
-    geom_tile(aes(x = x, y = y, fill = Fill), width = 0.05, height = 0.8) +
-    geom_text(aes(x = x + 0.08, y = y, label = Label), hjust = 0, size = 3.2) +
-    scale_fill_viridis_c(option = "C", guide = "none") +
-    labs(title = "RMSE & % Change by Region") +
-    theme_void() +
-    theme(
-      plot.title = element_text(size = 10, face = "bold", hjust = 0.5),
-      plot.margin = margin(5, 5, 5, 5)
-    ) +
-    coord_cartesian(clip = "off") +
-    xlim(0.8, 3.2)
-}
-
-# === Function to combine main map and legend plots vertically ===
-combine_plots <- function(map_plot, legend_plot) {
-  grid.arrange(
-    map_plot,
-    legend_plot + 
-      theme(
-        plot.title = element_text(hjust = 0.5, size = 10),
-        plot.margin = margin(t = 0, r = 10, b = 0, l = 10)
-      ),
-    nrow = 2,
-    heights = c(2.5, 1.2)
+# Calculate % change
+heatmap_data <- forecast_df %>%
+  left_join(baseline_df, by = "region") %>%
+  mutate(
+    region = tolower(trimws(gsub("^NHS England ", "", region))),
+    pct_change = (predicted_att - baseline_att) / baseline_att
   )
-}
+
+# === 3. Calculate RMSE per region ===
+error_df <- comparison_att_region_df %>%
+  filter(ds >= as.Date("2024-07-01") & ds <= as.Date("2024-12-31")) %>%
+  group_by(region) %>%
+  summarise(
+    rmse = sqrt(mean((actual_AE_att_tot - pred_rf_AE_att_tot)^2, na.rm = TRUE)),
+    .groups = "drop"
+  ) %>%
+  mutate(region = tolower(trimws(gsub("^NHS England ", "", region))))
+
+# === 4. Join all to map ===
+map_df <- regions_map %>%
+  left_join(heatmap_data, by = c("NHSER24NM" = "region")) %>%
+  left_join(error_df, by = c("NHSER24NM" = "region"))
+
+# === 5. Build the map plot ===
+map_plot <- ggplot(map_df) +
+  geom_sf(aes(fill = pct_change), color = "white", linewidth = 0.3) +
+  scale_fill_viridis_c(name = "% Change", labels = scales::percent, option = "C") +
+  labs(
+    title = "Forecasted A&E Attendance Surge by NHS Region",
+    subtitle = "Jul–Dec 2024 vs Jan–Jun 2024"
+  ) +
+  theme_minimal()
+
+# === 6. Build the bottom legend (2 columns, slim tiles, compact spacing) ===
+n_regions <- nrow(map_df)
+n_cols <- 2
+n_rows <- ceiling(n_regions / n_cols)
+
+legend_data <- map_df %>%
+  st_drop_geometry() %>%
+  mutate(
+    Region = tools::toTitleCase(NHSER24NM),
+    Label = paste0(Region, ": RMSE = ", format(round(rmse), big.mark = ","), 
+                   "; Δ = ", round(pct_change * 100, 1), "%"),
+    Fill = pct_change
+  ) %>%
+  arrange(desc(pct_change)) %>%
+  mutate(
+    row = rep(1:n_rows, times = n_cols)[1:n_regions],
+    col = rep(1:n_cols, each = n_rows)[1:n_regions],
+    x = ifelse(col == 1, 1, 2.55),  # space between columns
+    y = -row
+  )
+
+legend_plot <- ggplot(legend_data) +
+  geom_tile(aes(x = x, y = y, fill = Fill), width = 0.05, height = 0.8) +
+  geom_text(aes(x = x + 0.08, y = y, label = Label), hjust = 0, size = 3.2) +
+  scale_fill_viridis_c(option = "C", guide = "none") +
+  labs(title = "RMSE & % Change by Region") +
+  theme_void() +
+  theme(
+    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),
+    plot.margin = margin(5, 5, 5, 5)
+  ) +
+  coord_cartesian(clip = "off") +
+  xlim(0.8, 3.5)
+
+# === 7. Combine map and legend ===
+grid.arrange(
+  map_plot,
+  legend_plot,
+  nrow = 2,
+  heights = c(2.5, 1.2)
+)
