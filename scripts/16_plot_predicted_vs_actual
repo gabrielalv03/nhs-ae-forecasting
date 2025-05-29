@@ -5,7 +5,6 @@ library(stringr)
 library(patchwork)
 
 plot_pred_vs_actual <- function(df, actual_col, pred_prefix, title) {
-  # derive the suffix to remove, e.g. "AE_att_tot" or "AE_over4_pct"
   suffix <- str_remove(actual_col, "^actual_")
   
   df_long <- df %>%
@@ -15,31 +14,29 @@ plot_pred_vs_actual <- function(df, actual_col, pred_prefix, title) {
       values_to = "Predicted"
     ) %>%
     mutate(
-      # strip off "pred_"
       Model = str_remove(Model, pred_prefix),
-      # strip off the "_<suffix>" part
       Model = str_remove(Model, paste0("_", suffix)),
-      # recode to pretty names
       Model = recode(Model,
                      lm      = "Linear Model",
                      rf      = "Random Forest",
                      prophet = "Prophet",
-                     xgb     = "XGBoost"
-      )
+                     xgb     = "XGBoost")
     )
   
   ggplot(df_long, aes(x = !!sym(actual_col), y = Predicted)) +
     geom_point(alpha = 0.6) +
     geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "red") +
     facet_wrap(~ Model, scales = "free") +
+    scale_y_continuous(labels = scales::label_comma()) +
     labs(
       title = title,
       x     = "Actual",
-      y     = "Actual"    # ← your requested y-axis label
+      y     = "Predicted"
     ) +
     theme_minimal() +
     theme(
-      plot.title = element_text(hjust = 0.5)  # ← center the title
+      plot.title  = element_text(hjust = 0.5),
+      strip.text  = element_text(size = 13, face = "bold")  # 👈 increase facet label size
     )
 }
 
@@ -61,3 +58,4 @@ print(p1)
 print(p2)
 print(p3)
 print(p4)
+
