@@ -1,16 +1,18 @@
 library(dplyr)
 library(ggplot2)
 
-# === Step 0: Set NHS Theme ===
+# === 1. Set NHS Theme ===
 theme_nhs <- theme_minimal(base_size = 13) +
   theme(
     plot.title.position = "plot",
-    plot.title          = element_text(hjust = 0.5, face = "bold"),
-    plot.subtitle       = element_text(hjust = 0.5),   # ✅ center the subtitle
+    plot.title          = element_text(size = 16, hjust = 0.5, face = "bold"),
+    plot.subtitle       = element_text(size = 14, hjust = 0.5),
     legend.position     = "bottom",
     legend.key          = element_rect(fill = "white", linewidth = 0),
-    axis.text.x         = element_text(angle = 30, hjust = 1),
-    axis.text.y         = element_text(),
+    legend.text         = element_text(size = 13),
+    legend.title        = element_text(size = 13),
+    axis.text.x         = element_text(size = 14, angle = 30, hjust = 1),
+    axis.text.y         = element_text(size = 14),
     axis.title.x        = element_text(size = 14),
     axis.title.y        = element_text(size = 14),
     panel.grid.major    = element_line(color = "grey80", linewidth = 0.3),
@@ -20,77 +22,63 @@ theme_nhs <- theme_minimal(base_size = 13) +
 
 theme_set(theme_nhs)
 
-# === Step 1: Recalculate RMSE/MAE on aggregated data ===
-rf_totals <- comparison_over4_region_df %>%
-  group_by(date = ds) %>%
-  summarise(
-    actual = sum(actual_AE_over4_pct),
-    predicted = sum(pred_rf_AE_over4_pct),
-    .groups = "drop"
-  )
-
-mae  <- mean(abs(rf_totals$actual - rf_totals$predicted))
-rmse <- sqrt(mean((rf_totals$actual - rf_totals$predicted)^2))
-
-# === Step 2: Create error_df for plotting (Jul–Dec 2024 only) ===
-error_df <- rf_totals %>%
-  filter(date >= as.Date("2024-07-01") & date <= as.Date("2024-12-31")) %>%
-  mutate(type = "Forecast", residual = actual - predicted)
-
-# === Step 3: Bring in historical actuals from 2022–mid-2024 ===
-# === NATIONAL-LEVEL ===
+# === 2. Get national monthly average from train_data ===
 national_historical_df <- train_data %>%
   filter(date >= as.Date("2022-01-01") & date <= as.Date("2024-06-30")) %>%
-  group_by(date) %>%
-  summarise(attendances = sum(AE_att_tot, na.rm = TRUE), .groups = "drop") %>%
-  mutate(attendances = attendances / 1e5)
-
-# === REGIONAL-LEVEL ===
-regional_historical_df <- train_data %>%
-  filter(date >= as.Date("2022-01-01") & date <= as.Date("2024-06-30")) %>%
   group_by(region, date) %>%
-  summarise(attendances = sum(AE_att_tot, na.rm = TRUE), .groups = "drop") %>%
-  mutate(attendances_scaled = attendances / 1e5)
+  summarise(region_total = sum(AE_att_tot, na.rm = TRUE), .groups = "drop") %>%
+  group_by(date) %>%
+  summarise(national_avg = mean(region_total, na.rm = TRUE), .groups = "drop") %>%
+  mutate(national_avg = national_avg / 1e5)
 
-historical_df <- historical_df %>%
-  mutate(attendances = attendances / 1e5)
+comparison_att_region_df <- comparison_att_region_df %>%
+  mutate(ds = as.Date(as.character(ds)))
 
-error_df <- error_df %>%
-  mutate(actual = actual / 1e5,
-         predicted = predicted / 1e5)
+# === 3. Get national average forecast from comparison_att_region_df ===
+national_forecast_df <- comparison_att_region_df %>%
+  filter(ds >= as.Date("2024-07-01") & ds <= as.Date("2024-12-31")) %>%
+  group_by(ds) %>%
+  summarise(
+    actual = mean(actual_AE_att_tot, na.rm = TRUE),
+    predicted = mean(pred_rf_AE_att_tot, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  rename(date = ds) %>%  # so the rest of the plotting works without changes
+  mutate(
+    actual = actual / 1e5,
+    predicted = predicted / 1e5,
+    residual = actual - predicted
+  )
 
-# === Step 4: Plot ===
+# === 4. Calculate metrics ===
+mae  <- mean(abs(national_forecast_df$residual))
+rmse <- sqrt(mean(national_forecast_df$residual^2))
+
+# === 5. Plot ===
 ggplot() +
-  # Forecast period shading
   annotate("rect", xmin = as.Date("2024-07-01"), xmax = as.Date("2024-12-31"),
            ymin = -Inf, ymax = Inf, fill = "blue", alpha = 0.1) +
   
-  # Red error lines
-  geom_segment(data = error_df,
+  geom_segment(data = national_forecast_df,
                aes(x = date, xend = date, y = actual, yend = predicted),
                color = "red", alpha = 0.5) +
   
-  # Historical actuals
   geom_line(data = national_historical_df,
-            aes(x = date, y = attendances, color = "Actual", linetype = "Actual"), size = 1.1) +
+            aes(x = date, y = national_avg, color = "Actual", linetype = "Actual"), size = 1.1) +
   
-  # Actual points (Jul–Dec 2024)
-  geom_point(data = error_df,
+  geom_point(data = national_forecast_df,
              aes(x = date, y = actual, color = "Actual"), size = 2) +
   
-  # Forecast line and points
-  geom_line(data = error_df,
+  geom_line(data = national_forecast_df,
             aes(x = date, y = predicted, color = "Forecast", linetype = "Forecast"), size = 1.1) +
-  geom_point(data = error_df,
+  geom_point(data = national_forecast_df,
              aes(x = date, y = predicted, color = "Forecast"), size = 2) +
   
-  # Style
   scale_color_manual(values = c("Actual" = "black", "Forecast" = "steelblue")) +
   scale_linetype_manual(values = c("Actual" = "solid", "Forecast" = "dotted")) +
   labs(
     title = "National",
-    subtitle = paste0("MAE = ", format(round(mae), big.mark = ","), 
-                      ", RMSE = ", format(round(rmse), big.mark = ",")),
+    subtitle = paste0("MAE = ", round(mae, 2), ", RMSE = ", round(rmse, 2)),
     x = "Date",
     y = expression("Monthly Attendances ("*10^5*")"),
     color = "Data Type",
