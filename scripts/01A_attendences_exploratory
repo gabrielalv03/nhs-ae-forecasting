@@ -309,6 +309,101 @@ print(plots_by_region[["Midlands"]])
 print(plots_by_region[["South West"]])
 print(plots_by_region[["South East"]])
 
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(stringr)
+
+# Step 1: Prepare trust-level data with region label and month
+trust_level_data <- ordered_data %>%
+  mutate(
+    region_label = str_remove(str_trim(region), "^NHS England\\s+"),
+    month        = floor_date(date, "month"),
+    year         = year(month)
+  )
+
+# Step 2: Join with population data
+trust_level_data <- trust_level_data %>%
+  left_join(
+    population_extended %>%
+      mutate(region_label = str_remove(str_trim(region), "^NHS England\\s+")) %>%
+      select(region, region_label, year, population),
+    by = c("region", "region_label", "year")
+  )
+
+# Step 3: Calculate attendances per 100k and day offset
+trust_level_data <- trust_level_data %>%
+  mutate(
+    AE_per_100k = AE_att_tot / population * 1e5,
+    day         = as.numeric(month - min(month, na.rm = TRUE))
+  )
+
+# Step 4: Keep only trusts with ≥12 data points
+# Define the full date range
+full_months <- seq.Date(from = as.Date("2015-07-01"), to = as.Date("2024-12-01"), by = "month")
+
+# Filter to trusts that have data for *every month* in the range
+valid_trusts <- trust_level_data %>%
+  filter(!is.na(AE_att_tot) & AE_att_tot > 0) %>%
+  group_by(region_label, code) %>%
+  summarise(
+    months_present = list(unique(month)),
+    n_months       = n_distinct(month),
+    .groups        = "drop"
+  ) %>%
+  filter(n_months == length(full_months))  # exactly 114 months
+
+# Apply filter
+trust_level_filtered <- trust_level_data %>%
+  semi_join(valid_trusts, by = c("region_label", "code"))
+
+# Step 5: Fit slope per trust (identified by region_label + code)
+trust_slopes <- trust_level_filtered %>%
+  group_by(region_label, code) %>%
+  summarise(
+    slope_raw = coef(lm(AE_per_100k ~ day, data = cur_data()))["day"] * 365.25,
+    mean_val  = mean(AE_per_100k, na.rm = TRUE),
+    .groups   = "drop"
+  ) %>%
+  mutate(slope_pct = 100 * slope_raw / mean_val)
+
+# Step 6: Plot boxplot
+# --- Count trusts per region
+trust_counts <- trust_slopes %>%
+  group_by(region_label) %>%
+  summarise(n_trusts = n(), .groups = "drop")
+
+# --- Calculate national average slope
+national_avg_slope <- mean(trust_slopes$slope_pct, na.rm = TRUE)
+
+# Step: Relabel x-axis with trust counts
+trust_slopes <- trust_slopes %>%
+  left_join(trust_counts, by = "region_label") %>%
+  mutate(region_label_n = paste0(region_label, "\n(n=", n_trusts, ")"))
+
+# Now use region_label_n as x-axis
+ggplot(trust_slopes, aes(x = region_label_n, y = slope_pct, fill = region_label)) +
+  geom_boxplot(color = "black", outlier.alpha = 0.3) +
+  
+  # Dashed horizontal line for national average
+  geom_hline(
+    yintercept = national_avg_slope,
+    linetype = "dashed", color = "black", size = 0.8
+  ) +
+  
+  scale_fill_manual(values = region_cols) +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  labs(
+    title = "% Change in A&E Attendances per 100,000 People per Year",
+    x = "Region",
+    y = "% Change"
+  ) +
+  theme_nhs +
+  theme(
+    legend.position = "none",
+    axis.text.x = element_text(angle = 40, hjust = 1)
+  )
+
 # ============================================================================================================
 # BOXPLOT AE ATTENDENCES/100,000 POPULATION BY REGION 
 # ============================================================================================================
