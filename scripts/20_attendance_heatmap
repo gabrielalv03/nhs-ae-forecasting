@@ -96,3 +96,108 @@ grid.arrange(
   nrow = 2,
   heights = c(2.5, 1.2)
 )
+
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(forcats)
+
+# === STEP 1: Map region from train_data ===
+trust_region_lookup <- train_data %>%
+  select(name, region) %>%
+  distinct() %>%
+  mutate(region = tolower(trimws(gsub("^NHS England ", "", region))))
+
+# === STEP 2: Forecasted attendances per trust ===
+forecast_trust_df <- comparison_att_trust_df %>%
+  filter(ds >= as.Date("2024-07-01"), ds <= as.Date("2024-12-31")) %>%
+  group_by(name) %>%
+  summarise(predicted_att = sum(pred_rf_AE_att_tot, na.rm = TRUE), .groups = "drop")
+
+# === STEP 3: Baseline attendances per trust ===
+baseline_trust_df <- train_data %>%
+  filter(date >= as.Date("2024-01-01"), date <= as.Date("2024-06-30")) %>%
+  group_by(name) %>%
+  summarise(baseline_att = sum(AE_att_tot, na.rm = TRUE), .groups = "drop")
+
+# === STEP 4: Calculate trust-level % change, add region ===
+trust_pct_df <- forecast_trust_df %>%
+  left_join(baseline_trust_df, by = "name") %>%
+  left_join(trust_region_lookup, by = "name") %>%
+  mutate(
+    pct_change = (predicted_att - baseline_att) / baseline_att
+  ) %>%
+  filter(!is.na(region))
+
+# === STEP 5: Corrected region-level % change from ORIGINAL DATA ===
+forecast_region_df <- comparison_att_region_df %>%
+  filter(ds >= as.Date("2024-07-01"), ds <= as.Date("2024-12-31")) %>%
+  group_by(region) %>%
+  summarise(predicted_att = sum(pred_rf_AE_att_tot, na.rm = TRUE), .groups = "drop")
+
+baseline_region_df <- train_data %>%
+  filter(date >= as.Date("2024-01-01"), date <= as.Date("2024-06-30")) %>%
+  group_by(region) %>%
+  summarise(baseline_att = sum(AE_att_tot, na.rm = TRUE), .groups = "drop")
+
+region_pct_df <- forecast_region_df %>%
+  left_join(baseline_region_df, by = "region") %>%
+  mutate(
+    region = tolower(trimws(gsub("^NHS England ", "", region))),
+    region_pct_change = (predicted_att - baseline_att) / baseline_att
+  ) %>%
+  arrange(region) %>%
+  mutate(
+    region_factor = factor(region, levels = unique(region)),
+    y = as.numeric(region_factor),
+    ymin = y - 0.4,
+    ymax = y + 0.4
+  )
+
+# Ensure matching region factors
+trust_pct_df <- trust_pct_df %>%
+  mutate(region_factor = factor(region, levels = levels(region_pct_df$region_factor)))
+
+# === STEP 6: Final Plot (matching heatmap perfectly) ===
+ggplot() +
+  geom_rect(
+    data = region_pct_df,
+    aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax, fill = region_pct_change),
+    alpha = 0.3
+  ) +
+  geom_jitter(
+    data = trust_pct_df,
+    aes(x = pct_change, y = as.numeric(region_factor)),
+    color = "black",
+    width = 0, height = 0.2,
+    size = 2
+  ) +
+  scale_y_continuous(
+    breaks = region_pct_df$y,
+    labels = tools::toTitleCase(region_pct_df$region),
+    expand = expansion(add = c(0.5, 0.5))
+  ) +
+  scale_fill_viridis_c(
+    option = "C",
+    labels = scales::percent_format(accuracy = 0.1),
+    name = "Region % Change"
+  ) +
+  labs(
+    x = "% Change in Attendances",
+    y = "NHS Region"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    legend.direction = "horizontal",
+    legend.key.width = unit(1, "cm"),   # original key width
+    legend.title.align = 0.5,
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.y = element_text(size = 12, angle = 45, hjust = 1)
+  ) +
+  guides(fill = guide_colorbar(
+    title.position = "left",  # move title to left of scale bar
+    title.hjust = 1,          # right-align the title text next to scale bar
+    label.position = "bottom"
+  ))
