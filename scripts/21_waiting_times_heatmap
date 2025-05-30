@@ -187,4 +187,110 @@ grid.arrange(
   nrow    = 2,
   heights = c(2.5, 1.2)
 )
+library(dplyr)
+library(ggplot2)
+library(viridis)
+library(forcats)
+
+# --- Clean region names helper ---
+clean_region_names <- function(x) {
+  tolower(trimws(gsub("^NHS England ", "", x)))
+}
+
+# === STEP 1: Prepare trust-level data ===
+trust_region_lookup <- train_data %>%
+  select(name, region) %>%
+  distinct() %>%
+  mutate(region = clean_region_names(region))
+
+forecast_trust_df <- comparison_over4_trust_df %>%
+  filter(ds >= as.Date("2024-07-01"), ds <= as.Date("2024-12-31")) %>%
+  group_by(name) %>%
+  summarise(predicted_over4 = mean(pred_xgb_AE_over4_tot, na.rm = TRUE), .groups = "drop")
+
+baseline_trust_df <- train_data %>%
+  filter(date >= as.Date("2024-01-01"), date <= as.Date("2024-06-30")) %>%
+  group_by(name) %>%
+  summarise(baseline_over4 = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop")
+
+trust_pct_df <- forecast_trust_df %>%
+  left_join(baseline_trust_df, by = "name") %>%
+  left_join(trust_region_lookup, by = "name") %>%
+  mutate(pct_change = (predicted_over4 - baseline_over4) / baseline_over4) %>%
+  filter(!is.na(region))
+
+# === STEP 2: Use ONLY comparison_over4_region_df for regional colors ===
+forecast_region_df <- comparison_over4_region_df %>%
+  filter(ds >= as.Date("2024-07-01"), ds <= as.Date("2024-12-31")) %>%
+  group_by(region) %>%
+  summarise(predicted_over4 = mean(pred_xgb_AE_over4_tot, na.rm = TRUE), .groups = "drop") %>%
+  mutate(region = clean_region_names(region))
+
+baseline_region_df <- train_data %>%
+  filter(date >= as.Date("2024-01-01"), date <= as.Date("2024-06-30")) %>%
+  group_by(region) %>%
+  summarise(baseline_over4 = mean(AE_over4_pct, na.rm = TRUE), .groups = "drop") %>%
+  mutate(region = clean_region_names(region))
+
+region_pct_df <- forecast_region_df %>%
+  left_join(baseline_region_df, by = "region") %>%
+  mutate(region_pct_change = (predicted_over4 - baseline_over4) / baseline_over4) %>%
+  arrange(region) %>%
+  mutate(
+    region_factor = factor(region, levels = unique(region)),
+    y = as.numeric(region_factor),
+    ymin = y - 0.4,
+    ymax = y + 0.4
+  )
+
+# Align trust data factor levels
+trust_pct_df <- trust_pct_df %>%
+  mutate(region_factor = factor(region, levels = levels(region_pct_df$region_factor)))
+
+# === STEP 3: Plot ===
+ggplot() +
+  # Background rectangles colored by region-level % change from comparison_over4_region_df ONLY
+  geom_rect(
+    data = region_pct_df,
+    aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax, fill = region_pct_change),
+    alpha = 0.3
+  ) +
+  # Trust-level jitter points over the background
+  geom_jitter(
+    data = trust_pct_df,
+    aes(x = pct_change, y = as.numeric(region_factor)),
+    color = "black",
+    width = 0, height = 0.2,
+    size = 2
+  ) +
+  scale_y_continuous(
+    breaks = region_pct_df$y,
+    labels = tools::toTitleCase(region_pct_df$region),
+    expand = expansion(add = c(0.5, 0.5))
+  ) +
+  scale_fill_viridis_c(
+    option = "C",
+    labels = scales::percent_format(accuracy = 0.1),
+    name = "Region % Change"
+  ) +
+  labs(
+    x = "% Change in Attendances > 4h",
+    y = "NHS Region"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "top",
+    legend.direction = "horizontal",
+    legend.key.width = unit(1, "cm"),
+    legend.title.align = 0.5,
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle = element_text(hjust = 0.5),
+    axis.text.y = element_text(size = 12, angle = 45, hjust = 1)
+  ) +
+  guides(fill = guide_colorbar(
+    title.position = "left",
+    title.hjust = 1,
+    label.position = "bottom"
+  ))
+
 
