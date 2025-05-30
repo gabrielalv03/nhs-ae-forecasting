@@ -4,56 +4,131 @@ library(ggplot2)
 library(stringr)
 library(patchwork)
 
-plot_pred_vs_actual <- function(df, actual_col, pred_prefix, title) {
+# === NHS Theme with Minor Gridlines ===
+theme_nhs <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title.position = "plot",
+    plot.title          = element_text(hjust = 0.5, face = "bold"),
+    legend.position     = "bottom",
+    legend.key          = element_rect(fill = "white", linewidth = 0),
+    axis.text.x = element_text(),
+    axis.text.y         = element_text(),
+    axis.title.x        = element_text(size = 14),
+    axis.title.y        = element_text(size = 14),
+    panel.grid.major    = element_line(color = "grey80", linewidth = 0.3),
+    panel.grid.minor    = element_blank(),  # 👈 removed minor gridlines
+    panel.border        = element_rect(color = "grey80", fill = NA, linewidth = 0.3)
+  )
+
+theme_set(theme_nhs)
+
+# === Plotting Function ===
+plot_pred_vs_actual <- function(df, actual_col, pred_prefix, title,
+                                scale_factor = 1,
+                                axis_label = "",
+                                label_format = scales::label_number(accuracy = 1),
+                                breaks = waiver(),
+                                limits = NULL,
+                                minor_breaks = NULL) {
   suffix <- str_remove(actual_col, "^actual_")
   
   df_long <- df %>%
     pivot_longer(
-      cols      = starts_with(pred_prefix),
-      names_to  = "Model",
+      cols = starts_with(pred_prefix),
+      names_to = "Model",
       values_to = "Predicted"
     ) %>%
     mutate(
+      !!actual_col := .data[[actual_col]] / scale_factor,
+      Predicted     = Predicted / scale_factor,
       Model = str_remove(Model, pred_prefix),
-      Model = str_remove(Model, paste0("_", suffix)),
+      Model = str_remove(Model, paste0("_.*$", "")),
       Model = recode(Model,
-                     lm      = "Linear Model",
-                     rf      = "Random Forest",
+                     lm = "Linear Model",
+                     rf = "Random Forest",
                      prophet = "Prophet",
-                     xgb     = "XGBoost")
+                     xgb = "XGBoost")
     )
   
+  if (is.null(limits)) {
+    axis_vals <- c(df_long[[actual_col]], df_long$Predicted)
+    axis_min <- min(axis_vals, na.rm = TRUE)
+    axis_max <- max(axis_vals, na.rm = TRUE)
+    axis_range <- axis_max - axis_min
+    limits <- c(axis_min - 0.05 * axis_range, axis_max + 0.05 * axis_range)
+  }
+  
   ggplot(df_long, aes(x = !!sym(actual_col), y = Predicted)) +
-    geom_point(alpha = 0.6) +
-    geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "red") +
-    facet_wrap(~ Model, scales = "free") +
-    scale_y_continuous(labels = scales::label_comma()) +
-    labs(
-      title = title,
-      x     = "Actual",
-      y     = "Predicted"
+    geom_point(alpha = 0.6, color = "black") +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+    facet_wrap(~ Model, scales = "fixed") +
+    scale_x_continuous(
+      limits = limits,
+      labels = label_format,
+      breaks = breaks,
+      minor_breaks = minor_breaks,
+      expand = c(0, 0)
     ) +
-    theme_minimal() +
+    scale_y_continuous(
+      limits = limits,
+      labels = label_format,
+      breaks = breaks,
+      minor_breaks = minor_breaks,
+      expand = c(0, 0)
+    ) +
+    labs(
+  title = title,
+  x = bquote("Actual (" * 10^.(log10(scale_factor)) * ")"),
+  y = bquote("Predicted (" * 10^.(log10(scale_factor)) * ")")
+) +
+    theme_nhs +
     theme(
-      plot.title  = element_text(hjust = 0.5),
-      strip.text  = element_text(size = 13, face = "bold")  # 👈 increase facet label size
+      plot.title = element_text(hjust = 0.5),
+      strip.text = element_text(size = 13, face = "bold")
     )
 }
 
-# Then combine exactly as before:
+# === Create the 4 plots with defined grid structure ===
+
 p1 <- plot_pred_vs_actual(comparison_att_region_df,
                           "actual_AE_att_tot", "pred_",
-                          "Attendance by Region")
+                          "Attendance by Region",
+                          scale_factor = 1e5,  # ✅ now scaled to match ×10⁵
+                          axis_label = " (×10⁵)",
+                          label_format = scales::label_number(accuracy = 1),
+                          breaks = c(0, 2, 4, 6),
+                          minor_breaks = seq(0, 7, by = 0.5),
+                          limits = c(0, 7))
+
 p2 <- plot_pred_vs_actual(comparison_att_trust_df,
                           "actual_AE_att_tot", "pred_",
-                          "Attendance by Trust")
+                          "Attendance by Trust",
+                          scale_factor = 1e4,  # ✅ match ×10⁴
+                          axis_label = " (×10⁴)",
+                          label_format = scales::label_number(accuracy = 1),
+                          breaks = c(0, 2, 4),
+                          minor_breaks = seq(0, 5, by = 0.5),
+                          limits = c(0, 5))
+
 p3 <- plot_pred_vs_actual(comparison_over4_region_df,
                           "actual_AE_over4_pct", "pred_",
-                          "% Over 4h by Region")
+                          "% Over 4h by Region",
+                          scale_factor = 1e-1,
+                          label_format = scales::label_number(accuracy = 1),
+                          breaks = seq(2, 5, 1),                 # clearer ticks every 0.5
+                          minor_breaks = seq(2, 5, 0.1),          # optional: finer minor ticks
+                          limits = c(2, 5))
+
 p4 <- plot_pred_vs_actual(comparison_over4_trust_df,
                           "actual_AE_over4_pct", "pred_",
-                          "% Over 4h by Trust")
+                          "% Over 4h by Trust",
+                          scale_factor = 1e-1,
+                          label_format = scales::label_number(accuracy = 1),
+                          breaks = seq(0, 60, 20) / 10,        # divide by 10
+                          minor_breaks = seq(0, 60, 5) / 10,   # divide by 10
+                          limits = c(0, 60) / 10)              # divide by 10
 
+# === Display the plots ===
 print(p1)
 print(p2)
 print(p3)
