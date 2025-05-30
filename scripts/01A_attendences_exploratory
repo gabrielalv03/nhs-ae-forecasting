@@ -482,11 +482,11 @@ ggplot(plot_data, aes(x = year, y = population, color = region_label)) +
     aes(
       x     = max(plot_data$year) + 0.2,
       y     = last_pop,
-      label = sprintf("%+.2f%%/year", pct_growth),
+      label = sprintf("%+.2f%%/yr", pct_growth),
       color = region_label
     ),
-    hjust       = 0,
-    size        = 3.5,
+    hjust       = 0.05,
+    size        = 4.8,
     fontface    = "bold",
     show.legend = FALSE
   ) +
@@ -497,17 +497,17 @@ ggplot(plot_data, aes(x = year, y = population, color = region_label)) +
     x     = max(plot_data$year) + 0.2,
     y     = national_df$population[1] +
       nat_slope * (max(plot_data$year) - min(plot_data$year)) * 0.5,
-    label    = sprintf("%+.2f%%/year", nat_pct),
+    label    = sprintf("%+.2f%%/yr", nat_pct),
     color    = "black",
-    hjust    = 0,
-    size     = 3.5,
+    hjust    = 0.05,
+    size     = 4.8,
     fontface = "bold"
   ) +
   
   # colour scale & legend layout
   scale_color_manual(
     values = all_cols,
-    breaks = c("National avg", regions)
+    breaks = c("National Average", regions)
   ) +
   guides(color = guide_legend(nrow = 2, byrow = TRUE)) +
   
