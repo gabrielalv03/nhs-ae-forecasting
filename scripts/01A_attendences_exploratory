@@ -80,17 +80,20 @@ plot_data_normalized <- plot_data %>%
 # === Set standard theme ===
 theme_nhs <- theme_minimal(base_size = 13) +
   theme(
-    plot.title.position = "plot",
-    plot.title          = element_text(hjust = 0.5, face = "bold"),
-    legend.position     = "bottom",
-    legend.key          = element_rect(fill = "white", linewidth = 0),
-    axis.text.x         = element_text(angle = 30, hjust = 1),
-    axis.text.y         = element_text(),
-    axis.title.x        = element_text(size = 14),
-    axis.title.y        = element_text(size = 14),
-    panel.grid.major    = element_line(color = "grey80", linewidth = 0.3),
-    panel.grid.minor    = element_blank(),
-    panel.border        = element_rect(color = "grey80", fill = NA, linewidth = 0.3)
+    plot.title.position  = "plot",
+    plot.title           = element_text(hjust = 0.5, face = "bold"),
+    legend.position      = "bottom",
+    legend.justification = c(0, 0),        # truly left-aligns inside plot area
+    legend.box.just      = "left",         # aligns the box to the left
+    legend.key           = element_rect(fill = "white", linewidth = 0),
+    legend.text          = element_text(size = 12),
+    axis.text.x          = element_text(angle = 30, hjust = 1, size = 14),
+    axis.text.y          = element_text(size = 14),
+    axis.title.x         = element_text(size = 16),
+    axis.title.y         = element_text(size = 16),
+    panel.grid.major     = element_line(color = "grey80", linewidth = 0.3),
+    panel.grid.minor     = element_blank(),
+    panel.border         = element_rect(color = "grey80", fill = NA, linewidth = 0.3)
   )
 
 theme_set(theme_nhs)
