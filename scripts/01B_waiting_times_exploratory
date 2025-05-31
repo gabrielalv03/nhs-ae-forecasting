@@ -256,6 +256,83 @@ print(plots_by_region[["Midlands"]])
 print(plots_by_region[["South West"]])
 print(plots_by_region[["South East"]])
 
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+
+# Assuming 'train_data' contains the 'region' column and 'name' represents trusts
+# Assuming 'plot_data' contains the 'region' and 'region_label' columns
+
+# Step 1: Calculate the percentage point increase per year for each region
+plot_data_yearly_increase <- plot_data %>%
+  group_by(region, region_label, year) %>%
+  dplyr::summarize(  # Explicitly use dplyr::summarize
+    AE_over4_pct = mean(AE_over4_pct, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(region, year) %>%
+  group_by(region) %>%
+  mutate(
+    yearly_increase = AE_over4_pct - lag(AE_over4_pct)
+  ) %>%
+  filter(!is.na(yearly_increase))  # Remove NA values for the first year
+
+# Step 2: Count the number of unique trusts per region from 'train_data'
+# Valid trusts are those with non-NA data points
+valid_trust_count <- train_data %>%
+  filter(!is.na(name)) %>%  # Ensure that trusts with missing data are excluded
+  group_by(region) %>%
+  summarize(trust_count = n_distinct(name), .groups = "drop")
+
+# Step 3: Merge the valid trust count with the yearly increase data based on 'region'
+plot_data_yearly_increase <- plot_data_yearly_increase %>%
+  left_join(valid_trust_count, by = "region")
+
+# Step 4: Create a new variable for region_label_n to append the trust count on a new line
+plot_data_yearly_increase <- plot_data_yearly_increase %>%
+  mutate(region_label_n = paste0(region_label, "\n(n = ", trust_count, ")"))
+
+# Set the national average slope (you can calculate or use an existing value)
+national_avg_slope <- mean(plot_data_yearly_increase$yearly_increase, na.rm = TRUE)  # Replace with your national value
+
+# Define region colors using RColorBrewer
+region_names <- sort(unique(plot_data_yearly_increase$region_label))
+region_cols  <- brewer.pal(length(region_names), "Dark2") %>% set_names(region_names)
+
+# Set the NHS theme for the plot
+theme_nhs <- theme_minimal(base_size = 13) +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+    axis.text.x = element_text(angle = 40, hjust = 1, size = 14),  # X axis labels font size
+    axis.title.x = element_text(size = 14),  # X axis title font size
+    axis.title.y = element_text(size = 14),  # Y axis title font size
+    axis.text.y = element_text(size = 14),   # Y axis labels font size
+    panel.grid.major = element_line(color = "grey80", linewidth = 0.3),
+    panel.grid.minor = element_blank(),
+    panel.border = element_rect(color = "grey80", fill = NA, linewidth = 0.3)
+  )
+
+# Create the violin plot with boxplot inside, dashed horizontal line, and styling
+ggplot(plot_data_yearly_increase, aes(x = region_label_n, y = yearly_increase, fill = region_label)) +
+  geom_violin(trim = FALSE, color = "black", alpha = 0.8) +  # Violin plot
+  geom_boxplot(width = 0.1, color = "black", fill = "white", outlier.alpha = 0.3) +  # Boxplot inside
+  geom_hline(
+    yintercept = national_avg_slope, 
+    linetype = "dashed", color = "black", size = 0.8  # Dashed line for national average
+  ) +
+  scale_fill_manual(values = region_cols) +  # Region color palette
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +  # Y-axis formatting
+  labs(
+    title = "Yearly Percentage Point Increase in A&E Attendances Over 4 Hours by Region",
+    x = "Region",
+    y = "Change in % Over 4h (pp/year)"
+  ) +
+  theme_nhs +  # Apply the NHS theme
+  theme(
+    legend.position = "none"  # No legend
+  )
+
 # ============================================================================================================
 # BOXPLOT AE ATTENDENCES OVER 4 HOURS BY REGION 
 # ============================================================================================================
