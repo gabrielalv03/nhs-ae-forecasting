@@ -112,7 +112,7 @@ trust_region_lookup <- train_data %>%
 forecast_trust_df <- comparison_att_trust_df %>%
   filter(ds >= as.Date("2024-07-01"), ds <= as.Date("2024-12-31")) %>%
   group_by(name) %>%
-  summarise(predicted_att = sum(pred_rf_AE_att_tot, na.rm = TRUE), .groups = "drop")
+  summarise(predicted_att = sum(pred_prophet_AE_att_tot, na.rm = TRUE), .groups = "drop")
 
 # === STEP 3: Baseline attendances per trust ===
 baseline_trust_df <- train_data %>%
@@ -201,3 +201,4 @@ ggplot() +
     title.hjust = 1,          # right-align the title text next to scale bar
     label.position = "bottom"
   ))
+
