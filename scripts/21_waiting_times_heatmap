@@ -187,6 +187,7 @@ grid.arrange(
   nrow    = 2,
   heights = c(2.5, 1.2)
 )
+
 library(dplyr)
 library(ggplot2)
 library(viridis)
@@ -206,7 +207,7 @@ trust_region_lookup <- train_data %>%
 forecast_trust_df <- comparison_over4_trust_df %>%
   filter(ds >= as.Date("2024-07-01"), ds <= as.Date("2024-12-31")) %>%
   group_by(name) %>%
-  summarise(predicted_over4 = mean(pred_xgb_AE_over4_tot, na.rm = TRUE), .groups = "drop")
+  summarise(predicted_over4 = mean(pred_lm_AE_over4_pct, na.rm = TRUE), .groups = "drop")
 
 baseline_trust_df <- train_data %>%
   filter(date >= as.Date("2024-01-01"), date <= as.Date("2024-06-30")) %>%
