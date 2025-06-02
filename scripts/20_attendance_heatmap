@@ -172,6 +172,18 @@ ggplot() +
     width = 0, height = 0.2,
     size = 2
   ) +
+  geom_point(
+    data = trust_outliers,
+    aes(x = pct_change, y = as.numeric(region_factor)),
+    color = "red",
+    size = 2
+  ) +
+  geom_text_repel(
+    data = trust_outliers,
+    aes(x = pct_change, y = as.numeric(region_factor), label = code),
+    color = "red", fontface = "bold", size = 3,
+    direction = "y", nudge_y = 0.2, segment.size = 0.2
+  ) +
   scale_y_continuous(
     breaks = region_pct_df$y,
     labels = tools::toTitleCase(region_pct_df$region),
@@ -201,4 +213,28 @@ ggplot() +
     title.hjust = 1,          # right-align the title text next to scale bar
     label.position = "bottom"
   ))
+
+trust_pct_df <- trust_pct_df %>%
+  left_join(train_data %>% select(name, code) %>% distinct(), by = "name")
+
+# Step 7: Identify outliers using IQR method
+iqr_bounds <- trust_pct_df %>%
+  summarise(
+    Q1 = quantile(pct_change, 0.25, na.rm = TRUE),
+    Q3 = quantile(pct_change, 0.75, na.rm = TRUE)
+  ) %>%
+  mutate(
+    IQR = Q3 - Q1,
+    lower_bound = Q1 - 1.5 * IQR,
+    upper_bound = Q3 + 1.5 * IQR
+  )
+
+# Step 8: Flag outliers
+trust_outliers <- trust_pct_df %>%
+  filter(pct_change < iqr_bounds$lower_bound | pct_change > iqr_bounds$upper_bound) %>%
+  arrange(desc(abs(pct_change)))
+
+# View the outliers
+print(trust_outliers %>% select(name, code, region, pct_change))
+
 
