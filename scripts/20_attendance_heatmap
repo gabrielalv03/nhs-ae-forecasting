@@ -1,240 +1,28 @@
-# === LOAD LIBRARIES ===
-library(dplyr)
-library(ggplot2)
-library(sf)
-library(viridis)
-library(gridExtra)
-
-# === 1. Load and prepare map data ===
-regions_map <- st_read("NHSER_JAN_2024_EN_BGC.shp") %>%
-  mutate(NHSER24NM = tolower(trimws(NHSER24NM)))
-
-# === 2. Prepare forecast data ===
-# Predicted attendances for Jul–Dec 2024
-forecast_df <- comparison_att_region_df %>%
-  filter(ds >= as.Date("2024-07-01") & ds <= as.Date("2024-12-31")) %>%
-  group_by(region) %>%
-  summarise(predicted_att = sum(pred_rf_AE_att_tot, na.rm = TRUE), .groups = "drop")
-
-# Actual attendances for Jan–Jun 2024
-baseline_df <- train_data %>%
-  filter(date >= as.Date("2024-01-01") & date <= as.Date("2024-06-30")) %>%
-  group_by(region) %>%
-  summarise(baseline_att = sum(AE_att_tot, na.rm = TRUE), .groups = "drop")
-
-# Calculate % change
-heatmap_data <- forecast_df %>%
-  left_join(baseline_df, by = "region") %>%
+trust_outliers <- trust_outliers %>%
   mutate(
-    region = tolower(trimws(gsub("^NHS England ", "", region))),
-    pct_change = (predicted_att - baseline_att) / baseline_att
+    label_vjust = case_when(
+      code == "R0D" ~ 1,
+      code == "RHU" ~ -1,
+      code == "RDU" ~ -1.2,
+      code == "RA2" ~ -1,
+      code == "RY2" ~ 1.2,
+      code == "RWA" ~ -2,
+      code == "RFR" ~ -1.8,
+      code == "RR7" ~ 1.2,
+      code == "RNN" ~ -1,
+      code == "RNQ" ~ 1.2,
+      code == "RRK" ~ -1.2,
+      code == "RY8" ~ 2.6,
+      code == "RWD" ~ -1.2,
+      code == "RAX" ~ -1.2,
+      code == "RYX" ~ 1.9,
+      code == "RC9" ~ 1.5,
+      TRUE ~ -0.7
+    ),
+    label_x = case_when(
+      code == "RWA" ~ pct_change - 0.02,  # shift left
+      code == "RWR" ~ pct_change + 0.02,  # shift right
+      TRUE ~ pct_change
+    )
   )
-
-# === 3. Calculate RMSE per region ===
-error_df <- comparison_att_region_df %>%
-  filter(ds >= as.Date("2024-07-01") & ds <= as.Date("2024-12-31")) %>%
-  group_by(region) %>%
-  summarise(
-    rmse = sqrt(mean((actual_AE_att_tot - pred_rf_AE_att_tot)^2, na.rm = TRUE)),
-    .groups = "drop"
-  ) %>%
-  mutate(region = tolower(trimws(gsub("^NHS England ", "", region))))
-
-# === 4. Join all to map ===
-map_df <- regions_map %>%
-  left_join(heatmap_data, by = c("NHSER24NM" = "region")) %>%
-  left_join(error_df, by = c("NHSER24NM" = "region"))
-
-# === 5. Build the map plot ===
-map_plot <- ggplot(map_df) +
-  geom_sf(aes(fill = pct_change), color = "white", linewidth = 0.3) +
-  scale_fill_viridis_c(name = "% Change", labels = scales::percent, option = "C") +
-  labs(
-    title = "Forecasted A&E Attendance Surge by NHS Region",
-    subtitle = "Jul–Dec 2024 vs Jan–Jun 2024"
-  ) +
-  theme_minimal()
-
-# === 6. Build the bottom legend (2 columns, slim tiles, compact spacing) ===
-n_regions <- nrow(map_df)
-n_cols <- 2
-n_rows <- ceiling(n_regions / n_cols)
-
-legend_data <- map_df %>%
-  st_drop_geometry() %>%
-  mutate(
-    Region = tools::toTitleCase(NHSER24NM),
-    Label = paste0(Region, ": RMSE = ", format(round(rmse), big.mark = ","), 
-                   "; Δ = ", round(pct_change * 100, 1), "%"),
-    Fill = pct_change
-  ) %>%
-  arrange(desc(pct_change)) %>%
-  mutate(
-    row = rep(1:n_rows, times = n_cols)[1:n_regions],
-    col = rep(1:n_cols, each = n_rows)[1:n_regions],
-    x = ifelse(col == 1, 1, 2.55),  # space between columns
-    y = -row
-  )
-
-legend_plot <- ggplot(legend_data) +
-  geom_tile(aes(x = x, y = y, fill = Fill), width = 0.05, height = 0.8) +
-  geom_text(aes(x = x + 0.08, y = y, label = Label), hjust = 0, size = 3.2) +
-  scale_fill_viridis_c(option = "C", guide = "none") +
-  labs(title = "RMSE & % Change by Region") +
-  theme_void() +
-  theme(
-    plot.title = element_text(size = 10, face = "bold", hjust = 0.5),
-    plot.margin = margin(5, 5, 5, 5)
-  ) +
-  coord_cartesian(clip = "off") +
-  xlim(0.8, 3.5)
-
-# === 7. Combine map and legend ===
-grid.arrange(
-  map_plot,
-  legend_plot,
-  nrow = 2,
-  heights = c(2.5, 1.2)
-)
-
-library(dplyr)
-library(ggplot2)
-library(viridis)
-library(forcats)
-
-# === STEP 1: Map region from train_data ===
-trust_region_lookup <- train_data %>%
-  select(name, region) %>%
-  distinct() %>%
-  mutate(region = tolower(trimws(gsub("^NHS England ", "", region))))
-
-# === STEP 2: Forecasted attendances per trust ===
-forecast_trust_df <- comparison_att_trust_df %>%
-  filter(ds >= as.Date("2024-07-01"), ds <= as.Date("2024-12-31")) %>%
-  group_by(name) %>%
-  summarise(predicted_att = sum(pred_prophet_AE_att_tot, na.rm = TRUE), .groups = "drop")
-
-# === STEP 3: Baseline attendances per trust ===
-baseline_trust_df <- train_data %>%
-  filter(date >= as.Date("2024-01-01"), date <= as.Date("2024-06-30")) %>%
-  group_by(name) %>%
-  summarise(baseline_att = sum(AE_att_tot, na.rm = TRUE), .groups = "drop")
-
-# === STEP 4: Calculate trust-level % change, add region ===
-trust_pct_df <- forecast_trust_df %>%
-  left_join(baseline_trust_df, by = "name") %>%
-  left_join(trust_region_lookup, by = "name") %>%
-  mutate(
-    pct_change = (predicted_att - baseline_att) / baseline_att
-  ) %>%
-  filter(!is.na(region))
-
-# === STEP 5: Corrected region-level % change from ORIGINAL DATA ===
-forecast_region_df <- comparison_att_region_df %>%
-  filter(ds >= as.Date("2024-07-01"), ds <= as.Date("2024-12-31")) %>%
-  group_by(region) %>%
-  summarise(predicted_att = sum(pred_rf_AE_att_tot, na.rm = TRUE), .groups = "drop")
-
-baseline_region_df <- train_data %>%
-  filter(date >= as.Date("2024-01-01"), date <= as.Date("2024-06-30")) %>%
-  group_by(region) %>%
-  summarise(baseline_att = sum(AE_att_tot, na.rm = TRUE), .groups = "drop")
-
-region_pct_df <- forecast_region_df %>%
-  left_join(baseline_region_df, by = "region") %>%
-  mutate(
-    region = tolower(trimws(gsub("^NHS England ", "", region))),
-    region_pct_change = (predicted_att - baseline_att) / baseline_att
-  ) %>%
-  arrange(region) %>%
-  mutate(
-    region_factor = factor(region, levels = unique(region)),
-    y = as.numeric(region_factor),
-    ymin = y - 0.4,
-    ymax = y + 0.4
-  )
-
-# Ensure matching region factors
-trust_pct_df <- trust_pct_df %>%
-  mutate(region_factor = factor(region, levels = levels(region_pct_df$region_factor)))
-
-# === STEP 6: Final Plot (matching heatmap perfectly) ===
-ggplot() +
-  geom_rect(
-    data = region_pct_df,
-    aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax, fill = region_pct_change),
-    alpha = 0.3
-  ) +
-  geom_jitter(
-    data = trust_pct_df,
-    aes(x = pct_change, y = as.numeric(region_factor)),
-    color = "black",
-    width = 0, height = 0.2,
-    size = 2
-  ) +
-  geom_point(
-    data = trust_outliers,
-    aes(x = pct_change, y = as.numeric(region_factor)),
-    color = "red",
-    size = 2
-  ) +
-  geom_text_repel(
-    data = trust_outliers,
-    aes(x = pct_change, y = as.numeric(region_factor), label = code),
-    color = "red", fontface = "bold", size = 3,
-    direction = "y", nudge_y = 0.2, segment.size = 0.2
-  ) +
-  scale_y_continuous(
-    breaks = region_pct_df$y,
-    labels = tools::toTitleCase(region_pct_df$region),
-    expand = expansion(add = c(0.5, 0.5))
-  ) +
-  scale_fill_viridis_c(
-    option = "C",
-    labels = scales::percent_format(accuracy = 0.1),
-    name = "Region % Change"
-  ) +
-  labs(
-    x = "% Change in Attendances",
-    y = "NHS Region"
-  ) +
-  theme_minimal(base_size = 14) +
-  theme(
-    legend.position = "top",
-    legend.direction = "horizontal",
-    legend.key.width = unit(1, "cm"),   # original key width
-    legend.title.align = 0.5,
-    plot.title = element_text(hjust = 0.5, face = "bold"),
-    plot.subtitle = element_text(hjust = 0.5),
-    axis.text.y = element_text(size = 12, angle = 45, hjust = 1)
-  ) +
-  guides(fill = guide_colorbar(
-    title.position = "left",  # move title to left of scale bar
-    title.hjust = 1,          # right-align the title text next to scale bar
-    label.position = "bottom"
-  ))
-
-trust_pct_df <- trust_pct_df %>%
-  left_join(train_data %>% select(name, code) %>% distinct(), by = "name")
-
-# Step 7: Identify outliers using IQR method
-iqr_bounds <- trust_pct_df %>%
-  summarise(
-    Q1 = quantile(pct_change, 0.25, na.rm = TRUE),
-    Q3 = quantile(pct_change, 0.75, na.rm = TRUE)
-  ) %>%
-  mutate(
-    IQR = Q3 - Q1,
-    lower_bound = Q1 - 1.5 * IQR,
-    upper_bound = Q3 + 1.5 * IQR
-  )
-
-# Step 8: Flag outliers
-trust_outliers <- trust_pct_df %>%
-  filter(pct_change < iqr_bounds$lower_bound | pct_change > iqr_bounds$upper_bound) %>%
-  arrange(desc(abs(pct_change)))
-
-# View the outliers
-print(trust_outliers %>% select(name, code, region, pct_change))
-
 
