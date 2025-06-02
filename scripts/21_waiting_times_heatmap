@@ -248,50 +248,99 @@ region_pct_df <- forecast_region_df %>%
 trust_pct_df <- trust_pct_df %>%
   mutate(region_factor = factor(region, levels = levels(region_pct_df$region_factor)))
 
+# === STEP 1: Calculate IQR bounds ===
+iqr_bounds <- trust_pct_df %>%
+  summarise(
+    Q1 = quantile(pct_change, 0.25, na.rm = TRUE),
+    Q3 = quantile(pct_change, 0.75, na.rm = TRUE)
+  ) %>%
+  mutate(
+    IQR   = Q3 - Q1,
+    lower = Q1 - 1.5 * IQR,
+    upper = Q3 + 1.5 * IQR
+  )
+
+# === STEP 2: Flag outliers and attach trust codes ===
+trust_pct_df <- trust_pct_df %>%
+  left_join(train_data %>% select(name, code) %>% distinct(), by = "name") %>%
+  mutate(
+    is_outlier = pct_change < iqr_bounds$lower | pct_change > iqr_bounds$upper
+  )
+
+# Subset for labels
+trust_outliers <- trust_pct_df %>%
+  filter(is_outlier)
+
 # === STEP 3: Plot ===
 ggplot() +
-  # Background rectangles colored by region-level % change from comparison_over4_region_df ONLY
+  # Background rectangles showing region-level % change
   geom_rect(
     data = region_pct_df,
     aes(xmin = -Inf, xmax = Inf, ymin = ymin, ymax = ymax, fill = region_pct_change),
     alpha = 0.3
   ) +
-  # Trust-level jitter points over the background
+  
+  # Trust-level jitter points with conditional color
   geom_jitter(
     data = trust_pct_df,
-    aes(x = pct_change, y = as.numeric(region_factor)),
-    color = "black",
+    aes(x = pct_change, y = as.numeric(region_factor), color = is_outlier),
     width = 0, height = 0.2,
     size = 2
   ) +
+  scale_color_manual(
+    values = c("TRUE" = "red", "FALSE" = "black"),
+    guide = "none"  # hide legend
+  ) +
+  
+  # Labels for outlier trust codes
+  ggrepel::geom_text_repel(
+    data = trust_outliers,
+    aes(x = pct_change, y = as.numeric(region_factor), label = code),
+    size = 3,
+    fontface = "bold",
+    color = "red",
+    direction = "y",         # 🚨 this limits movement to vertical only
+    box.padding = 0.3,
+    point.padding = 0.2,
+    segment.size = 0.2,
+    segment.color = "red",
+    force = 1.2,
+    force_pull = 0.4,
+    max.overlaps = Inf
+  ) +
+  
+  # Y-axis setup for region names
   scale_y_continuous(
     breaks = region_pct_df$y,
     labels = tools::toTitleCase(region_pct_df$region),
     expand = expansion(add = c(0.5, 0.5))
   ) +
+  
+  # Fill scale for background region bands
   scale_fill_viridis_c(
     option = "C",
     labels = scales::percent_format(accuracy = 0.1),
     name = "Region % Change"
   ) +
+  
   labs(
     x = "% Change in Attendances > 4h",
     y = "NHS Region"
   ) +
   theme_minimal(base_size = 14) +
   theme(
-    legend.position = "top",
-    legend.direction = "horizontal",
-    legend.key.width = unit(1, "cm"),
-    legend.title.align = 0.5,
-    plot.title = element_text(hjust = 0.5, face = "bold"),
-    plot.subtitle = element_text(hjust = 0.5),
-    axis.text.y = element_text(size = 12, angle = 45, hjust = 1)
+    legend.position        = "top",
+    legend.direction        = "horizontal",
+    legend.key.width        = unit(1, "cm"),
+    legend.title.align      = 0.5,
+    plot.title              = element_text(hjust = 0.5, face = "bold"),
+    plot.subtitle           = element_text(hjust = 0.5),
+    axis.text.y             = element_text(size = 12, angle = 45, hjust = 1)
   ) +
   guides(fill = guide_colorbar(
     title.position = "left",
-    title.hjust = 1,
-    label.position = "bottom"
+    title.hjust     = 1,
+    label.position  = "bottom"
   ))
 
 
