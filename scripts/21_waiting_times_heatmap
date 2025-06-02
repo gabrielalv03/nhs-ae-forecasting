@@ -248,16 +248,26 @@ region_pct_df <- forecast_region_df %>%
 trust_pct_df <- trust_pct_df %>%
   mutate(region_factor = factor(region, levels = levels(region_pct_df$region_factor)))
 
-# === STEP 1: Calculate IQR bounds ===
-iqr_bounds <- trust_pct_df %>%
+# === STEP 1: Calculate region-specific IQR bounds ===
+iqr_bounds_by_region <- trust_pct_df %>%
+  group_by(region) %>%
   summarise(
     Q1 = quantile(pct_change, 0.25, na.rm = TRUE),
-    Q3 = quantile(pct_change, 0.75, na.rm = TRUE)
+    Q3 = quantile(pct_change, 0.75, na.rm = TRUE),
+    .groups = "drop"
   ) %>%
   mutate(
-    IQR   = Q3 - Q1,
+    IQR = Q3 - Q1,
     lower = Q1 - 1.5 * IQR,
     upper = Q3 + 1.5 * IQR
+  )
+
+# === STEP 2: Join bounds to trust data and flag regional outliers ===
+trust_pct_df <- trust_pct_df %>%
+  left_join(iqr_bounds_by_region, by = "region") %>%
+  left_join(train_data %>% select(name, code) %>% distinct(), by = "name") %>%
+  mutate(
+    is_outlier = pct_change < lower | pct_change > upper
   )
 
 # === STEP 2: Flag outliers and attach trust codes ===
