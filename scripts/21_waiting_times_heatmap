@@ -271,6 +271,12 @@ trust_pct_df <- trust_pct_df %>%
 trust_outliers <- trust_pct_df %>%
   filter(is_outlier)
 
+trust_outliers %>%
+  arrange(desc(abs(pct_change))) %>%
+  select(code, name, region, pct_change) %>%
+  mutate(pct_change = scales::percent(pct_change, accuracy = 0.1)) %>%
+  print(n = Inf)
+
 # === STEP 3: Plot ===
 ggplot() +
   # Background rectangles showing region-level % change
